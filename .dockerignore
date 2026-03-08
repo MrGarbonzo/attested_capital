@@ -1,0 +1,7 @@
+# Keep build context small for boot-agent Dockerfile
+**/node_modules
+**/.git
+**/dist
+**/target
+panthers-fund
+guardian-network

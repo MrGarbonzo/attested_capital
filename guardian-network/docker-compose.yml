@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  guardian:
+    build: .
+    container_name: panthers-guardian
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3100:3100"
+    volumes:
+      - guardian-data:/data
+      # SecretVM crypto volumes (mounted by SecretVM runtime)
+      - /mnt/secure/docker_public_key_ed25519.pem:/mnt/secure/docker_public_key_ed25519.pem:ro
+      - /mnt/secure/docker_attestation_ed25519.txt:/mnt/secure/docker_attestation_ed25519.txt:ro
+    environment:
+      - GUARDIAN_ADDRESS=${GUARDIAN_ADDRESS:-guardian-1}
+      - PORT=3100
+      - GUARDIAN_EXTERNAL_ENDPOINT=${GUARDIAN_EXTERNAL_ENDPOINT:-http://0.0.0.0:3100}
+      - FUND_MANAGER_ENDPOINT=${FUND_MANAGER_ENDPOINT:-http://host.docker.internal:3000}
+      - DB_PATH=/data/guardian.db
+      - MAX_BACKUPS=1000
+      - IS_SENTRY=${IS_SENTRY:-true}
+      - SECRETVM_SIGN_ENDPOINT=${SECRETVM_SIGN_ENDPOINT:-http://172.17.0.1:49153/sign}
+      - SECRETVM_PUBKEY_PEM_PATH=/mnt/secure/docker_public_key_ed25519.pem
+      - SECRETVM_ATTESTATION_PATH=/mnt/secure/docker_attestation_ed25519.txt
+      - GUARDIAN_TELEGRAM_BOT_TOKEN=${GUARDIAN_TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_GROUP_CHAT_ID=${TELEGRAM_GROUP_CHAT_ID:-}
+      - SEED_RPCS=${SEED_RPCS:-}
+      - REGISTRY_PROGRAM_ID=${REGISTRY_PROGRAM_ID:-}
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      - APPROVED_MEASUREMENTS=${APPROVED_MEASUREMENTS:-}
+
+volumes:
+  guardian-data:

@@ -1,0 +1,72 @@
+# Hot Standby — Single Backup (2 agents, 99.9% uptime)
+#
+# Primary runs normally. Backup runs in standby mode monitoring the registry.
+# On primary failure, backup takes over within ~6 minutes.
+#
+# Usage:
+#   docker compose -f docker-compose.ha.yml up -d
+#
+# Requires:
+#   - Guardian network running with IS_SENTRY=true
+#   - GUARDIAN_ENDPOINT set in usr/.env
+
+services:
+  # ── Primary Agent ──────────────────────────────────────────
+  panthers-primary:
+    image: panthers-fund:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: panthers-primary
+    environment:
+      PANTHERS_DB_PATH: /data/panthers.db
+      AGENT_MODE: primary
+      GUARDIAN_ENDPOINT: ${GUARDIAN_ENDPOINT:-http://host.docker.internal:3100}
+    ports:
+      - "8080:8080"
+    volumes:
+      - primary-data:/data
+    init: true
+    restart: unless-stopped
+    env_file:
+      - usr/.env
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://localhost:8080/status || exit 1"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Backup Agent (Standby) ────────────────────────────────
+  panthers-backup:
+    image: panthers-fund:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: panthers-backup
+    environment:
+      AGENT_MODE: standby
+      GUARDIAN_ENDPOINT: ${GUARDIAN_ENDPOINT:-http://host.docker.internal:3100}
+      RECOVERY_DB_DIR: /data
+    volumes:
+      - backup-data:/data
+    init: true
+    restart: unless-stopped
+    env_file:
+      - usr/.env
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://localhost:8080/status || exit 1"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  primary-data:
+    driver: local
+  backup-data:
+    driver: local

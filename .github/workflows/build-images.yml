@@ -1,0 +1,93 @@
+name: Build Docker Images
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      boot-agent: ${{ steps.filter.outputs.boot-agent }}
+      agent: ${{ steps.filter.outputs.agent }}
+      guardian: ${{ steps.filter.outputs.guardian }}
+      sha-short: ${{ steps.sha.outputs.short }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            boot-agent:
+              - 'boot-agent/**'
+              - 'solana-registry/**'
+            agent:
+              - 'panthers-fund/**'
+            guardian:
+              - 'guardian-network/**'
+      - id: sha
+        run: echo "short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+  build-boot-agent:
+    needs: changes
+    if: needs.changes.outputs.boot-agent == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: boot-agent/Dockerfile
+          push: true
+          tags: ghcr.io/mrgarbonzo/boot-agent:${{ github.ref_name }}-${{ needs.changes.outputs.sha-short }}
+        env:
+          DOCKER_BUILD_SUMMARY: false
+
+  build-agent:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./panthers-fund
+          file: panthers-fund/Dockerfile
+          push: true
+          tags: ghcr.io/mrgarbonzo/agent:${{ github.ref_name }}-${{ needs.changes.outputs.sha-short }}
+        env:
+          DOCKER_BUILD_SUMMARY: false
+
+  build-guardian:
+    needs: changes
+    if: needs.changes.outputs.guardian == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./guardian-network
+          file: guardian-network/Dockerfile
+          push: true
+          tags: ghcr.io/mrgarbonzo/guardian:${{ github.ref_name }}-${{ needs.changes.outputs.sha-short }}
+        env:
+          DOCKER_BUILD_SUMMARY: false

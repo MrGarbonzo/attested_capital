@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  agent:
+    build: .
+    container_name: panthers-agent
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - agent-data:/data
+      # Sealed config from boot-agent (SCP'd to this VM)
+      - ./sealed-config:/mnt/secure/boot-config:ro
+    environment:
+      - STATUS_PORT=8080
+      - PANTHERS_DB_PATH=/data/panthers.db
+      - AGENT_EXTERNAL_HOST=${AGENT_EXTERNAL_HOST:-localhost}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_GROUP_CHAT_ID=${TELEGRAM_GROUP_CHAT_ID:-}
+      - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS:-}
+      - SECRET_AI_API_KEY=${SECRET_AI_API_KEY:-}
+      - SECRET_AI_BASE_URL=${SECRET_AI_BASE_URL:-https://secretai-rytn.scrtlabs.com:21434/v1}
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      - REGISTRY_PROGRAM_ID=${REGISTRY_PROGRAM_ID:-}
+      - VAULT_KEY=${VAULT_KEY:-}
+      - BOOTSTRAP_GUARDIANS=${BOOTSTRAP_GUARDIANS:-}
+      - APPROVED_MEASUREMENTS=${APPROVED_MEASUREMENTS:-}
+
+volumes:
+  agent-data:

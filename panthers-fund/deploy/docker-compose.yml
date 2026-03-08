@@ -1,0 +1,28 @@
+services:
+  panthers-agent:
+    image: panthers-fund:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      PANTHERS_DB_PATH: /data/panthers.db
+    ports:
+      - "8080:8080"
+    volumes:
+      - panthers-data:/data
+    init: true
+    restart: unless-stopped
+    env_file:
+      - usr/.env
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://localhost:8080/status || exit 1"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  panthers-data:
+    driver: local

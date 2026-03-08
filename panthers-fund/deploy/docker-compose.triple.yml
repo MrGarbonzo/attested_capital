@@ -1,0 +1,71 @@
+# Hot Standby — Triple Redundancy (3 agents, 99.99% uptime)
+#
+# Primary + 2 backups. On primary failure, both backups detect and race
+# with random jitter. Only one wins registration (enforced by registry).
+# Loser returns to standby.
+#
+# For cross-cloud deployment, run each service on a different cloud provider
+# and point GUARDIAN_ENDPOINT to the guardian network.
+#
+# Usage:
+#   docker compose -f docker-compose.triple.yml up -d
+
+services:
+  # ── Primary Agent ──────────────────────────────────────────
+  panthers-primary:
+    image: panthers-fund:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: panthers-primary
+    environment:
+      PANTHERS_DB_PATH: /data/panthers.db
+      AGENT_MODE: primary
+      GUARDIAN_ENDPOINT: ${GUARDIAN_ENDPOINT:-http://host.docker.internal:3100}
+    volumes:
+      - primary-data:/data
+    init: true
+    restart: unless-stopped
+    env_file:
+      - usr/.env
+
+  # ── Backup Agent 1 ────────────────────────────────────────
+  panthers-backup-1:
+    image: panthers-fund:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: panthers-backup-1
+    environment:
+      AGENT_MODE: standby
+      GUARDIAN_ENDPOINT: ${GUARDIAN_ENDPOINT:-http://host.docker.internal:3100}
+      RECOVERY_DB_DIR: /data
+    volumes:
+      - backup1-data:/data
+    init: true
+    restart: unless-stopped
+    env_file:
+      - usr/.env
+
+  # ── Backup Agent 2 ────────────────────────────────────────
+  panthers-backup-2:
+    image: panthers-fund:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: panthers-backup-2
+    environment:
+      AGENT_MODE: standby
+      GUARDIAN_ENDPOINT: ${GUARDIAN_ENDPOINT:-http://host.docker.internal:3100}
+      RECOVERY_DB_DIR: /data
+    volumes:
+      - backup2-data:/data
+    init: true
+    restart: unless-stopped
+    env_file:
+      - usr/.env
+
+volumes:
+  primary-data:
+  backup1-data:
+  backup2-data:

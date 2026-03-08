@@ -1,0 +1,263 @@
+/**
+ * Backup Coordination — orchestrate takeover when primary agent fails.
+ *
+ * Takeover timeline:
+ *   T+0:      Primary crashes
+ *   T+5min:   Heartbeat timeout (300s), registry deactivates agent
+ *   T+5-5.5m: Backups detect, add random delay (0-30s)
+ *   T+5.5m:   First backup requests registration
+ *   T+5.5m:   Guardians vote (75% threshold, instant for pre-approved code)
+ *   T+5.5m:   Backup registered, fetches DB from guardians
+ *   T+6m:     Backup starts trading
+ *
+ * Safety: Backups CAN'T double-trade because:
+ *   - They have no database
+ *   - They aren't registered
+ *   - Only after winning registration AND receiving DB can they trade
+ */
+import type { TEEIdentity } from './tee.js';
+import {
+  generateAttestation,
+  serializeAttestation,
+} from './attestation-utils.js';
+import { recoverDatabase } from './db-recovery.js';
+import type { SolanaRegistryClient } from '../registry/solana-registry-client.js';
+
+/** Max random delay in milliseconds to reduce collision between backups. */
+const MAX_JITTER_MS = 30_000;
+
+/** Delay between registration retry attempts. */
+const RETRY_DELAY_MS = 10_000;
+
+/** Maximum number of registration attempts before giving up this cycle. */
+const MAX_ATTEMPTS = 3;
+
+export type TakeoverResult =
+  | { outcome: 'success'; dbPath: string }
+  | { outcome: 'lost_race'; activeAgent: string }
+  | { outcome: 'failed'; error: string };
+
+export interface TakeoverConfig {
+  guardianEndpoint: string;
+  teeIdentity: TEEIdentity;
+  /** Directory to write recovered database to. */
+  dbDir: string;
+}
+
+/**
+ * Attempt to take over from a failed primary agent.
+ *
+ * Steps:
+ *   1. Wait a random delay (0-30s) to reduce collision
+ *   2. Re-check registry (another backup may have already registered)
+ *   3. Request registration with guardian approval
+ *   4. If approved: fetch database from guardians
+ *   5. Return result (success with dbPath, or lost_race/failed)
+ */
+export async function attemptTakeover(config: TakeoverConfig): Promise<TakeoverResult> {
+  const endpoint = config.guardianEndpoint.replace(/\/$/, '');
+
+  // Step 1: Random jitter to reduce collision
+  const jitterMs = Math.floor(Math.random() * MAX_JITTER_MS);
+  console.log(`[Takeover] Waiting ${(jitterMs / 1000).toFixed(1)}s jitter before attempting`);
+  await sleep(jitterMs);
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    console.log(`[Takeover] Attempt ${attempt}/${MAX_ATTEMPTS}`);
+
+    // Step 2: Re-check registry — another backup may have won
+    const checkResult = await checkRegistry(endpoint);
+    if (checkResult.anotherAgentActive) {
+      console.log(`[Takeover] Another agent already registered: ${checkResult.activeAgentId}`);
+      return { outcome: 'lost_race', activeAgent: checkResult.activeAgentId! };
+    }
+
+    // Step 3: Request registration
+    const regResult = await requestRegistration(endpoint, config.teeIdentity);
+    if (regResult.success) {
+      console.log('[Takeover] Registration successful — fetching database');
+
+      // Step 4: Fetch database from guardians
+      const dbResult = await recoverDatabase({
+        guardianEndpoint: endpoint,
+        teeIdentity: config.teeIdentity,
+        outputDir: config.dbDir,
+      });
+
+      if (dbResult.success) {
+        console.log(`[Takeover] Database recovered: ${dbResult.dbPath}`);
+        return { outcome: 'success', dbPath: dbResult.dbPath! };
+      }
+
+      // DB recovery failed — we're registered but can't trade yet
+      // This is still a success from registration perspective;
+      // the caller should retry DB recovery
+      console.warn(`[Takeover] DB recovery failed: ${dbResult.error}`);
+      return { outcome: 'success', dbPath: '' };
+    }
+
+    if (regResult.lost) {
+      return { outcome: 'lost_race', activeAgent: regResult.activeAgent ?? 'unknown' };
+    }
+
+    console.warn(`[Takeover] Registration attempt ${attempt} failed: ${regResult.error}`);
+
+    if (attempt < MAX_ATTEMPTS) {
+      await sleep(RETRY_DELAY_MS);
+    }
+  }
+
+  return { outcome: 'failed', error: `Failed after ${MAX_ATTEMPTS} attempts` };
+}
+
+/** Check if another agent has already registered. */
+async function checkRegistry(
+  endpoint: string,
+): Promise<{ anotherAgentActive: boolean; activeAgentId: string | null }> {
+  try {
+    const res = await fetch(`${endpoint}/api/sentry/agent/current`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    if (res.status === 404) {
+      return { anotherAgentActive: false, activeAgentId: null };
+    }
+
+    if (res.ok) {
+      const agent = (await res.json()) as { teeInstanceId: string; isActive: boolean };
+      if (agent.isActive) {
+        return { anotherAgentActive: true, activeAgentId: agent.teeInstanceId };
+      }
+    }
+
+    return { anotherAgentActive: false, activeAgentId: null };
+  } catch {
+    return { anotherAgentActive: false, activeAgentId: null };
+  }
+}
+
+/** Request registration with the guardian network. */
+async function requestRegistration(
+  endpoint: string,
+  teeIdentity: TEEIdentity,
+): Promise<{ success: boolean; lost?: boolean; activeAgent?: string; error?: string }> {
+  try {
+    const attestation = generateAttestation(teeIdentity.instanceId, teeIdentity.codeHash);
+
+    const res = await fetch(`${endpoint}/api/sentry/agent/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        teeInstanceId: teeIdentity.instanceId,
+        codeHash: teeIdentity.codeHash,
+        attestation: serializeAttestation(attestation),
+        endpoint: 'self',
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    const result = (await res.json()) as { success: boolean; error?: string };
+
+    if (result.success) {
+      return { success: true };
+    }
+
+    // Check if the error indicates another agent won the race
+    if (result.error?.includes('already active')) {
+      return { success: false, lost: true, activeAgent: 'unknown' };
+    }
+
+    return { success: false, error: result.error };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Register the new agent on Solana after a successful takeover.
+ * This updates the on-chain registry so future guardians/backups can discover it.
+ */
+export async function registerSelfOnChain(opts: {
+  registryClient: SolanaRegistryClient;
+  teeIdentity: TEEIdentity;
+  endpoint: string;
+  ed25519Pubkey: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const txSig = await opts.registryClient.registerSelf({
+      entityType: 'agent',
+      endpoint: opts.endpoint,
+      teeInstanceId: opts.teeIdentity.instanceId,
+      codeHash: opts.teeIdentity.codeHash,
+      attestationHash: '',
+      ed25519Pubkey: opts.ed25519Pubkey,
+      isActive: true,
+    });
+    console.log(`[Takeover] Registered on Solana: ${txSig}`);
+    return { success: true };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.warn(`[Takeover] Solana registration failed (non-fatal): ${error}`);
+    return { success: false, error };
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Wire standby mode with takeover coordination.
+ *
+ * This is the main entry point for a backup agent:
+ *   1. Start in standby mode (monitoring registry)
+ *   2. When primary fails → run takeover
+ *   3. If takeover succeeds → return config for starting as primary
+ *   4. If takeover fails → return to standby
+ */
+export async function runBackupAgent(config: {
+  guardianEndpoint: string;
+  dbDir: string;
+}): Promise<{ dbPath: string; teeIdentity: TEEIdentity } | null> {
+  // Import dynamically to avoid circular deps
+  const { createStandbyManager } = await import('./standby-mode.js');
+  const { getTEEInstanceId } = await import('./tee.js');
+
+  const teeIdentity = await getTEEInstanceId();
+  let resolved = false;
+
+  return new Promise((resolve) => {
+    const standby = createStandbyManager(config.guardianEndpoint, {
+      onPrimaryFailure: async () => {
+        if (resolved) return false;
+
+        const result = await attemptTakeover({
+          guardianEndpoint: config.guardianEndpoint,
+          teeIdentity,
+          dbDir: config.dbDir,
+        });
+
+        if (result.outcome === 'success') {
+          resolved = true;
+          (standby as any).transitionToRegistered?.();
+          resolve({ dbPath: result.dbPath, teeIdentity });
+          return true;
+        }
+
+        if (result.outcome === 'lost_race') {
+          (standby as any).transitionToLostRace?.();
+        }
+
+        return false;
+      },
+      onBecamePrimary: async () => {
+        console.log('[Backup] Became primary — exiting standby');
+      },
+      onLostRace: () => {
+        console.log('[Backup] Lost race — returning to standby monitoring');
+      },
+    });
+
+    standby.start();
+  });
+}
