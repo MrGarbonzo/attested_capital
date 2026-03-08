@@ -4,7 +4,7 @@ FROM backpackapp/build:v0.30.1 AS anchor-builder
 WORKDIR /build
 COPY solana-registry/Cargo.toml solana-registry/Anchor.toml ./
 COPY solana-registry/programs/ programs/
-RUN anchor build
+RUN solana-keygen new --no-bip39-passphrase -o /root/.config/solana/id.json && anchor build
 
 # ── Stage 2: Build boot-agent TypeScript ───────────────────────
 FROM node:22-alpine AS builder
