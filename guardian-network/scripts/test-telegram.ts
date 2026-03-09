@@ -19,7 +19,8 @@ import { createGuardianBot, sendToGroup } from '../src/guardian/telegram.js';
 import { formatGuardianAnnounce } from '../src/shared/telegram-protocol.js';
 
 // ── Config ─────────────────────────────────────────────────────────
-const BOT_TOKEN = '8024604787:AAEwh0hZyzZCvExd5r8AjqdwAMsMe34oHls';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+if (!BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN env var is required');
 const GROUP_CHAT_ID = '-1002697503149';
 const GUARDIAN_ADDRESS = 'guardian-test';
 const GUARDIAN_ENDPOINT = 'http://localhost:3400';
