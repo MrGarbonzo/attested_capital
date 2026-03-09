@@ -32,8 +32,9 @@ export interface DeployRegistryResult {
   programId: string;
 }
 
-async function waitForFunding(connection: Connection, address: string): Promise<void> {
+async function waitForFunding(connection: Connection, publicKey: import('@solana/web3.js').PublicKey): Promise<void> {
   const start = Date.now();
+  const address = publicKey.toBase58();
 
   console.log('[boot] ════════════════════════════════════════');
   console.log('[boot] FUNDING REQUIRED');
@@ -43,16 +44,20 @@ async function waitForFunding(connection: Connection, address: string): Promise<
   console.log('[boot] ════════════════════════════════════════');
 
   while (Date.now() - start < POLL_TIMEOUT_MS) {
-    const balance = await connection.getBalance(address as any);
-    const sol = balance / LAMPORTS_PER_SOL;
+    try {
+      const balance = await connection.getBalance(publicKey);
+      const sol = balance / LAMPORTS_PER_SOL;
 
-    if (sol >= MIN_DEPLOY_SOL) {
-      console.log(`[boot] Funded! Balance: ${sol} SOL`);
-      return;
-    }
+      if (sol >= MIN_DEPLOY_SOL) {
+        console.log(`[boot] Funded! Balance: ${sol} SOL`);
+        return;
+      }
 
-    if (balance > 0) {
-      console.log(`[boot] Received ${sol} SOL — need at least ${MIN_DEPLOY_SOL} SOL`);
+      if (balance > 0) {
+        console.log(`[boot] Received ${sol} SOL — need at least ${MIN_DEPLOY_SOL} SOL`);
+      }
+    } catch (err) {
+      console.warn(`[boot] RPC poll error: ${err instanceof Error ? err.message : err}`);
     }
 
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
@@ -83,7 +88,7 @@ export async function deployRegistry(input: DeployRegistryInput): Promise<Deploy
 
   try {
     // Wait for operator to fund the deployer address
-    await waitForFunding(connection, payerKeypair.publicKey.toBase58());
+    await waitForFunding(connection, payerKeypair.publicKey);
 
     const cmd = [
       'solana', 'program', 'deploy',
