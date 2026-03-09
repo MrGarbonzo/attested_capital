@@ -22,6 +22,8 @@ export interface DeployAgentVmInput {
   agentImageTag: string;
   /** SecretVM size: small | medium | large */
   vmSize: string;
+  /** Deploy in dev mode (SSH access enabled) */
+  devMode: boolean;
 }
 
 export interface DeployAgentVmResult {
@@ -89,6 +91,7 @@ export function deployAgentVm(input: DeployAgentVmInput): DeployAgentVmResult {
       '-r', GHCR_REGISTRY,
       '-s',  // TLS enabled
       '-p',  // persistence across reboots
+      ...(input.devMode ? ['-E', 'dev'] : []),
     ].join(' ');
 
     console.log('[boot] Running: secretvm-cli vm create -n panthers-agent ...');

@@ -110,14 +110,16 @@ async function main(): Promise<void> {
   // ── Step 5: Deploy agent VM ─────────────────────────────
   const agentImageTag = requireEnv('AGENT_IMAGE_TAG');
   const vmSize = process.env.VM_SIZE ?? 'small';
+  const devMode = process.env.DEV_MODE === 'true';
 
-  console.log(`[boot] Step 5: Deploy agent VM (image=${agentImageTag}, size=${vmSize})`);
+  console.log(`[boot] Step 5: Deploy agent VM (image=${agentImageTag}, size=${vmSize}, dev=${devMode})`);
   const { agentVmId } = deployAgentVm({
     bootInput,
     registryProgramId,
     vaultKeyHex,
     agentImageTag,
     vmSize,
+    devMode,
   });
 
   // ── Done ─────────────────────────────────────────────────
