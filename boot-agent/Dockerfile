@@ -34,7 +34,7 @@ FROM node:22-slim
 # Install Solana CLI + secretvm-cli (needs glibc — Alpine won't work)
 RUN apt-get update && apt-get install -y --no-install-recommends curl bzip2 ca-certificates && \
     sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)" && \
-    ln -s /root/.local/share/solana/install/active_release/bin/solana /usr/local/bin/solana && \
+    for bin in /root/.local/share/solana/install/active_release/bin/*; do ln -sf "$bin" /usr/local/bin/; done && \
     npm install -g secretvm-cli && \
     apt-get purge -y curl bzip2 && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
