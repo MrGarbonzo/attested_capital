@@ -10,12 +10,9 @@ export interface BootInput {
   telegramAgentBotToken: string;
   telegramGuardianBotToken: string;
   telegramGroupChatId: string;
-  telegramAlertChatId: string;
-  telegramAllowedUsers: string;
   secretAiApiKey: string;
   solanaRpcUrl: string;
   jupiterApiKey: string;
-  agentExternalHost: string;
   approvedMeasurements?: string;
 }
 
@@ -23,14 +20,11 @@ export interface BootInput {
 export interface AgentSealedConfig {
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_GROUP_CHAT_ID: string;
-  TELEGRAM_ALERT_CHAT_ID: string;
-  TELEGRAM_ALLOWED_USERS: string;
   SECRET_AI_API_KEY: string;
   SOLANA_RPC_URL: string;
   JUPITER_API_KEY: string;
   REGISTRY_PROGRAM_ID: string;
   VAULT_KEY: string;
-  AGENT_EXTERNAL_HOST: string;
   APPROVED_MEASUREMENTS: string;
 }
 
@@ -38,7 +32,6 @@ export interface AgentSealedConfig {
 export interface GuardianSealedConfig {
   GUARDIAN_TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_GROUP_CHAT_ID: string;
-  TELEGRAM_ALERT_CHAT_ID: string;
   SOLANA_RPC_URL: string;
   REGISTRY_PROGRAM_ID: string;
   APPROVED_MEASUREMENTS: string;

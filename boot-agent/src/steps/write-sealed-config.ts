@@ -33,14 +33,11 @@ export function writeSealedConfig(input: WriteSealedConfigInput): WriteSealedCon
   const agentConfig: AgentSealedConfig = {
     TELEGRAM_BOT_TOKEN: input.bootInput.telegramAgentBotToken,
     TELEGRAM_GROUP_CHAT_ID: input.bootInput.telegramGroupChatId,
-    TELEGRAM_ALERT_CHAT_ID: input.bootInput.telegramAlertChatId,
-    TELEGRAM_ALLOWED_USERS: input.bootInput.telegramAllowedUsers,
     SECRET_AI_API_KEY: input.bootInput.secretAiApiKey,
     SOLANA_RPC_URL: input.bootInput.solanaRpcUrl,
     JUPITER_API_KEY: input.bootInput.jupiterApiKey,
     REGISTRY_PROGRAM_ID: input.registryProgramId,
     VAULT_KEY: input.vaultKeyHex,
-    AGENT_EXTERNAL_HOST: input.bootInput.agentExternalHost,
     APPROVED_MEASUREMENTS: input.bootInput.approvedMeasurements ?? '',
   };
 
@@ -48,7 +45,6 @@ export function writeSealedConfig(input: WriteSealedConfigInput): WriteSealedCon
   const guardianConfig: GuardianSealedConfig = {
     GUARDIAN_TELEGRAM_BOT_TOKEN: input.bootInput.telegramGuardianBotToken,
     TELEGRAM_GROUP_CHAT_ID: input.bootInput.telegramGroupChatId,
-    TELEGRAM_ALERT_CHAT_ID: input.bootInput.telegramAlertChatId,
     SOLANA_RPC_URL: input.bootInput.solanaRpcUrl,
     REGISTRY_PROGRAM_ID: input.registryProgramId,
     APPROVED_MEASUREMENTS: input.bootInput.approvedMeasurements ?? '',

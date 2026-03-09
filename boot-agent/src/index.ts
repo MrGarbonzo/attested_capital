@@ -72,12 +72,9 @@ async function main(): Promise<void> {
     telegramAgentBotToken: requireEnv('TELEGRAM_AGENT_BOT_TOKEN'),
     telegramGuardianBotToken: requireEnv('TELEGRAM_GUARDIAN_BOT_TOKEN'),
     telegramGroupChatId: requireEnv('TELEGRAM_GROUP_CHAT_ID'),
-    telegramAlertChatId: requireEnv('TELEGRAM_ALERT_CHAT_ID'),
-    telegramAllowedUsers: requireEnv('TELEGRAM_ALLOWED_USERS'),
     secretAiApiKey: requireEnv('SECRET_AI_API_KEY'),
     solanaRpcUrl: requireEnv('SOLANA_RPC_URL'),
     jupiterApiKey: requireEnv('JUPITER_API_KEY'),
-    agentExternalHost: requireEnv('AGENT_EXTERNAL_HOST'),
     approvedMeasurements: process.env.APPROVED_MEASUREMENTS,
   };
   console.log(`[boot] RPC: ${bootInput.solanaRpcUrl}`);
