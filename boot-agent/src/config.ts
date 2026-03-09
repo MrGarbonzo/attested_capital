@@ -7,7 +7,8 @@
 
 /** Environment variables consumed by the boot agent. */
 export interface BootInput {
-  telegramBotToken: string;
+  telegramAgentBotToken: string;
+  telegramGuardianBotToken: string;
   telegramGroupChatId: string;
   telegramAlertChatId: string;
   telegramAllowedUsers: string;
@@ -30,6 +31,16 @@ export interface AgentSealedConfig {
   REGISTRY_PROGRAM_ID: string;
   VAULT_KEY: string;
   AGENT_EXTERNAL_HOST: string;
+  APPROVED_MEASUREMENTS: string;
+}
+
+/** Sealed config written for the guardian container. */
+export interface GuardianSealedConfig {
+  GUARDIAN_TELEGRAM_BOT_TOKEN: string;
+  TELEGRAM_GROUP_CHAT_ID: string;
+  TELEGRAM_ALERT_CHAT_ID: string;
+  SOLANA_RPC_URL: string;
+  REGISTRY_PROGRAM_ID: string;
   APPROVED_MEASUREMENTS: string;
 }
 
