@@ -1,10 +1,22 @@
 # ── Stage 1: Build the Solana registry .so ─────────────────────
-FROM backpackapp/build:v0.30.1 AS anchor-builder
+FROM backpackapp/build:v0.31.0 AS anchor-builder
 
 WORKDIR /build
+
+# Upgrade platform-tools so cargo-build-sbf has Cargo >= 1.85 (edition2024 support)
+# v1.52 is the latest version that still includes the sbf-solana-solana target
+# required by cargo-build-sbf v2.1.0 (v1.53+ renamed it to sbpf-solana-solana)
+# Preserve version.md so cargo-build-sbf doesn't try to reinstall v1.43
+RUN PT_CACHE="/root/.cache/solana/v1.43/platform-tools" && \
+    cp "$PT_CACHE/version.md" /tmp/pt-version.md && \
+    rm -rf "$PT_CACHE" && mkdir -p "$PT_CACHE" && \
+    curl -fsSL "https://github.com/anza-xyz/platform-tools/releases/download/v1.52/platform-tools-linux-x86_64.tar.bz2" \
+      | tar -xj -C "$PT_CACHE" && \
+    cp /tmp/pt-version.md "$PT_CACHE/version.md"
+
 COPY solana-registry/Cargo.toml solana-registry/Anchor.toml ./
 COPY solana-registry/programs/ programs/
-RUN solana-keygen new --no-bip39-passphrase -o /root/.config/solana/id.json && anchor build
+RUN solana-keygen new --no-bip39-passphrase -o /root/.config/solana/id.json && anchor build --no-idl
 
 # ── Stage 2: Build boot-agent TypeScript ───────────────────────
 FROM node:22-alpine AS builder
