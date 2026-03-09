@@ -1,30 +1,64 @@
 /**
  * Deploy the Solana registry program via the `solana program deploy` CLI.
  *
- * Anchor programs require the upgradeable BPF loader (multi-step: create buffer,
- * write chunks, finalize) which isn't exposed by @solana/web3.js v1.  We shell
- * out to the Solana CLI instead.
- *
- * The payer keypair must be pre-funded with enough SOL to cover deployment.
+ * Generates a deployer keypair inside the TEE, prints the address, and polls
+ * until sufficient SOL is received before proceeding with deployment.
+ * The private key never leaves the TEE.
  */
 import { execSync } from 'node:child_process';
 import { writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Keypair } from '@solana/web3.js';
+import { Keypair, Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 /** Default path where the .so is baked into the Docker image. */
 const DEFAULT_SO_PATH = '/opt/solana-registry/solana_registry.so';
 
+/** Minimum SOL needed to deploy the registry program. */
+const MIN_DEPLOY_SOL = 3;
+
+/** How often to check for funding (ms). */
+const POLL_INTERVAL_MS = 10_000;
+
+/** Max time to wait for funding (ms). */
+const POLL_TIMEOUT_MS = 30 * 60_000; // 30 minutes
+
 export interface DeployRegistryInput {
   rpcUrl: string;
-  /** Path to a pre-funded Solana keypair JSON file. */
-  payerKeypairPath: string;
   soPath?: string;
 }
 
 export interface DeployRegistryResult {
   programId: string;
+}
+
+async function waitForFunding(connection: Connection, address: string): Promise<void> {
+  const start = Date.now();
+
+  console.log('[boot] ════════════════════════════════════════');
+  console.log('[boot] FUNDING REQUIRED');
+  console.log(`[boot] Send at least ${MIN_DEPLOY_SOL} SOL to:`);
+  console.log(`[boot]   ${address}`);
+  console.log('[boot] Waiting for funds...');
+  console.log('[boot] ════════════════════════════════════════');
+
+  while (Date.now() - start < POLL_TIMEOUT_MS) {
+    const balance = await connection.getBalance(address as any);
+    const sol = balance / LAMPORTS_PER_SOL;
+
+    if (sol >= MIN_DEPLOY_SOL) {
+      console.log(`[boot] Funded! Balance: ${sol} SOL`);
+      return;
+    }
+
+    if (balance > 0) {
+      console.log(`[boot] Received ${sol} SOL — need at least ${MIN_DEPLOY_SOL} SOL`);
+    }
+
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+
+  throw new Error(`Timed out waiting for funding after ${POLL_TIMEOUT_MS / 60_000} minutes`);
 }
 
 export async function deployRegistry(input: DeployRegistryInput): Promise<DeployRegistryResult> {
@@ -35,22 +69,28 @@ export async function deployRegistry(input: DeployRegistryInput): Promise<Deploy
     throw new Error(`Registry .so binary not found at ${soPath}. Build it first or set REGISTRY_PROGRAM_ID.`);
   }
 
-  if (!existsSync(input.payerKeypairPath)) {
-    throw new Error(`Payer keypair not found at ${input.payerKeypairPath}. Provide a pre-funded keypair via DEPLOYER_KEYPAIR_PATH.`);
-  }
+  const connection = new Connection(input.rpcUrl, 'confirmed');
 
-  // Generate a fresh program keypair — its pubkey becomes the program ID
+  // Generate deployer keypair inside TEE — private key never leaves
+  const payerKeypair = Keypair.generate();
+  const payerKeypairPath = join(tmpdir(), `registry-payer-${Date.now()}.json`);
+  writeFileSync(payerKeypairPath, JSON.stringify(Array.from(payerKeypair.secretKey)));
+
+  // Generate program keypair — its pubkey becomes the program ID
   const programKeypair = Keypair.generate();
   const programKeypairPath = join(tmpdir(), `registry-program-${Date.now()}.json`);
   writeFileSync(programKeypairPath, JSON.stringify(Array.from(programKeypair.secretKey)));
 
   try {
+    // Wait for operator to fund the deployer address
+    await waitForFunding(connection, payerKeypair.publicKey.toBase58());
+
     const cmd = [
       'solana', 'program', 'deploy',
       soPath,
       '--program-id', programKeypairPath,
       '--url', input.rpcUrl,
-      '--keypair', input.payerKeypairPath,
+      '--keypair', payerKeypairPath,
       '--commitment', 'confirmed',
     ].join(' ');
 
@@ -63,6 +103,7 @@ export async function deployRegistry(input: DeployRegistryInput): Promise<Deploy
 
     return { programId };
   } finally {
+    try { unlinkSync(payerKeypairPath); } catch { /* ignore */ }
     try { unlinkSync(programKeypairPath); } catch { /* ignore */ }
   }
 }

@@ -91,8 +91,7 @@ async function main(): Promise<void> {
     await verifyRegistry(bootInput.solanaRpcUrl, registryProgramId);
   } else {
     console.log('[boot] REGISTRY_PROGRAM_ID not set — deploying registry program');
-    const payerKeypairPath = requireEnv('DEPLOYER_KEYPAIR_PATH');
-    const result = await deployRegistry({ rpcUrl: bootInput.solanaRpcUrl, payerKeypairPath });
+    const result = await deployRegistry({ rpcUrl: bootInput.solanaRpcUrl });
     registryProgramId = result.programId;
     await verifyRegistry(bootInput.solanaRpcUrl, registryProgramId);
   }
