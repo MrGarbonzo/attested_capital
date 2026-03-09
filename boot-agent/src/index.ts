@@ -15,7 +15,7 @@ import { generateVaultKey } from './steps/generate-vault-key.js';
 import { writeSealedConfig } from './steps/write-sealed-config.js';
 import { verifyRegistry } from './steps/verify-registry.js';
 import { deployRegistry } from './steps/deploy-registry.js';
-import { deployVms } from './steps/deploy-vms.js';
+import { deployAgentVm } from './steps/deploy-vms.js';
 import type { BootInput } from './config.js';
 
 function requireEnv(name: string): string {
@@ -70,7 +70,6 @@ async function main(): Promise<void> {
   console.log('[boot] Step 1: Read environment');
   const bootInput: BootInput = {
     telegramAgentBotToken: requireEnv('TELEGRAM_AGENT_BOT_TOKEN'),
-    telegramGuardianBotToken: requireEnv('TELEGRAM_GUARDIAN_BOT_TOKEN'),
     telegramGroupChatId: requireEnv('TELEGRAM_GROUP_CHAT_ID'),
     secretAiApiKey: requireEnv('SECRET_AI_API_KEY'),
     solanaRpcUrl: requireEnv('SOLANA_RPC_URL'),
@@ -100,7 +99,7 @@ async function main(): Promise<void> {
   const teeInstanceId = getTeeInstanceId();
   const codeHash = getCodeHash();
 
-  const { agentConfigPath, guardianConfigPath, registryIdPath } = writeSealedConfig({
+  const { agentConfigPath, registryIdPath } = writeSealedConfig({
     bootInput,
     registryProgramId,
     vaultKeyHex,
@@ -108,18 +107,16 @@ async function main(): Promise<void> {
     codeHash,
   });
 
-  // ── Step 5: Deploy agent + guardian VMs ─────────────────
+  // ── Step 5: Deploy agent VM ─────────────────────────────
   const agentImageTag = requireEnv('AGENT_IMAGE_TAG');
-  const guardianImageTag = requireEnv('GUARDIAN_IMAGE_TAG');
   const vmSize = process.env.VM_SIZE ?? 'small';
 
-  console.log(`[boot] Step 5: Deploy VMs (agent=${agentImageTag}, guardian=${guardianImageTag}, size=${vmSize})`);
-  const { agentVmId, guardianVmId } = deployVms({
+  console.log(`[boot] Step 5: Deploy agent VM (image=${agentImageTag}, size=${vmSize})`);
+  const { agentVmId } = deployAgentVm({
     bootInput,
     registryProgramId,
     vaultKeyHex,
     agentImageTag,
-    guardianImageTag,
     vmSize,
   });
 
@@ -128,9 +125,7 @@ async function main(): Promise<void> {
   console.log('[boot] Boot sequence complete');
   console.log(`[boot]   Registry: ${registryProgramId}`);
   console.log(`[boot]   Agent VM: ${agentVmId}`);
-  console.log(`[boot]   Guardian VM: ${guardianVmId}`);
   console.log(`[boot]   Agent config: ${agentConfigPath}`);
-  console.log(`[boot]   Guardian config: ${guardianConfigPath}`);
   console.log(`[boot]   Registry ID: ${registryIdPath}`);
   console.log('[boot] ════════════════════════════════════════');
 }

@@ -204,8 +204,9 @@ async function main() {
             return;
           }
 
-          // Check RTMR3 against approved measurements (if configured)
+          // Check RTMR3 against approved measurements
           if (approvedMeasurements.size > 0) {
+            // Measurements locked — enforce strict match
             if (!pccsResult.containerMeasurement || !approvedMeasurements.has(pccsResult.containerMeasurement)) {
               res.writeHead(403, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
@@ -214,6 +215,19 @@ async function main() {
               }));
               return;
             }
+          } else {
+            // First-guardian auto-enrollment: no measurements configured yet.
+            // Accept this guardian and lock to its measurement for all future connections.
+            if (!pccsResult.containerMeasurement) {
+              res.writeHead(403, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: false,
+                error: 'First guardian must provide a container measurement to auto-enroll',
+              }));
+              return;
+            }
+            approvedMeasurements.add(pccsResult.containerMeasurement);
+            console.log(`[panthers-fund] First-guardian auto-enrollment: locked to measurement ${pccsResult.containerMeasurement}`);
           }
 
           // Verify X25519 pubkey signature (proves same TEE owns both keys)
@@ -264,24 +278,29 @@ async function main() {
   });
 
   // ── Initialize NFTMinter (cNFT minting) ───────────────────────
-  try {
-    const minter = new NFTMinter(
-      requireEnv('SOLANA_RPC_URL'),
-      ctx.wallet.getSolanaKeypair(),
-    );
+  const mockNft = process.env.MOCK_NFT === 'true';
+  if (mockNft) {
+    console.log('[panthers-fund] MOCK_NFT=true — skipping on-chain NFT minting, DB-only mode');
+  } else {
+    try {
+      const minter = new NFTMinter(
+        requireEnv('SOLANA_RPC_URL'),
+        ctx.wallet.getSolanaKeypair(),
+      );
 
-    // Load existing collection config from DB if available
-    const collectionConfig = ctx.db.getNFTCollectionConfig();
-    if (collectionConfig) {
-      minter.loadConfig(collectionConfig.collection_address, collectionConfig.merkle_tree_address);
-      console.log('[panthers-fund] NFTMinter loaded with existing collection config');
-    } else {
-      console.log('[panthers-fund] NFTMinter initialized (no collection config yet — run setup_nft_collection)');
+      // Load existing collection config from DB if available
+      const collectionConfig = ctx.db.getNFTCollectionConfig();
+      if (collectionConfig) {
+        minter.loadConfig(collectionConfig.collection_address, collectionConfig.merkle_tree_address);
+        console.log('[panthers-fund] NFTMinter loaded with existing collection config');
+      } else {
+        console.log('[panthers-fund] NFTMinter initialized (no collection config yet — run setup_nft_collection)');
+      }
+
+      ctx.nftMinter = minter;
+    } catch (err) {
+      console.warn(`[panthers-fund] NFTMinter init failed (non-fatal): ${err instanceof Error ? err.message : err}`);
     }
-
-    ctx.nftMinter = minter;
-  } catch (err) {
-    console.warn(`[panthers-fund] NFTMinter init failed (non-fatal): ${err instanceof Error ? err.message : err}`);
   }
 
   // ── Guardian discovery config ───────────────────────────────

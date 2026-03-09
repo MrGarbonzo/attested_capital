@@ -1,14 +1,14 @@
 /**
  * Boot agent configuration types.
  *
- * The boot agent writes sealed config for the agent container.
- * Guardians obtain their vault key via attestation exchange with the agent.
+ * Boot-agent is a one-shot bootstrapper that deploys the Solana registry
+ * and the agent VM. Guardians are deployed separately with the agent's
+ * registry details hardcoded at build time (part of their attestation).
  */
 
 /** Environment variables consumed by the boot agent. */
 export interface BootInput {
   telegramAgentBotToken: string;
-  telegramGuardianBotToken: string;
   telegramGroupChatId: string;
   secretAiApiKey: string;
   solanaRpcUrl: string;
@@ -28,26 +28,10 @@ export interface AgentSealedConfig {
   APPROVED_MEASUREMENTS: string;
 }
 
-/** Sealed config written for the guardian container. */
-export interface GuardianSealedConfig {
-  GUARDIAN_TELEGRAM_BOT_TOKEN: string;
-  TELEGRAM_GROUP_CHAT_ID: string;
-  SOLANA_RPC_URL: string;
-  REGISTRY_PROGRAM_ID: string;
-  APPROVED_MEASUREMENTS: string;
-}
-
 /** Format of a sealed JSON file (AES-256-GCM). */
 export interface SealedFile {
   ciphertext: string;
   iv: string;
   authTag: string;
   version: 1;
-}
-
-/** Result of the full boot sequence. */
-export interface BootResult {
-  registryProgramId: string;
-  vaultKey: string;
-  agentConfigPath: string;
 }

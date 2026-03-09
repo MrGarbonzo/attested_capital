@@ -683,10 +683,14 @@ export function buildTools(ctx: ServiceContext, config?: ToolsConfig): Tool[] {
           deposit,
         );
 
-        // Mint cNFT to buyer's wallet
+        // Mint cNFT to buyer's wallet (or assign mock address)
         let mintAddress: string | null = null;
         let mintNote: string | undefined;
-        if (ctx.nftMinter) {
+        if (process.env.MOCK_NFT === 'true') {
+          mintAddress = `mock-pntr-${tokenId}`;
+          ctx.db.setMintAddress(tokenId, mintAddress);
+          mintNote = 'Mock NFT — DB-only, no on-chain mint.';
+        } else if (ctx.nftMinter) {
           try {
             mintAddress = await ctx.nftMinter.mintToUser(buyerAddress, tokenId, deposit);
             ctx.db.setMintAddress(tokenId, mintAddress);
@@ -1058,7 +1062,9 @@ export function buildTools(ctx: ServiceContext, config?: ToolsConfig): Tool[] {
         // Try to burn the on-chain cNFT first (if it exists)
         const account = ctx.db.getNFTAccount(tokenId);
         let burnNote: string | undefined;
-        if (account?.mint_address && ctx.nftMinter) {
+        if (process.env.MOCK_NFT === 'true') {
+          burnNote = 'Mock NFT — DB-only, no on-chain burn.';
+        } else if (account?.mint_address && ctx.nftMinter) {
           try {
             await ctx.nftMinter.burnNFT(account.mint_address);
           } catch (err: unknown) {
@@ -1350,6 +1356,9 @@ export function buildTools(ctx: ServiceContext, config?: ToolsConfig): Tool[] {
       },
       category: 'admin',
       async execute(params) {
+        if (process.env.MOCK_NFT === 'true') {
+          return JSON.stringify({ info: 'MOCK_NFT mode — no on-chain collection needed. NFTs are DB-only.' });
+        }
         if (!ctx.nftMinter) {
           return JSON.stringify({ error: 'NFTMinter not initialized. Check Solana RPC and agent keypair.' });
         }
@@ -1403,6 +1412,11 @@ export function buildTools(ctx: ServiceContext, config?: ToolsConfig): Tool[] {
         }
         if (account.mint_address) {
           return JSON.stringify({ error: `Token #${tokenId} already has mint_address: ${account.mint_address}` });
+        }
+        if (process.env.MOCK_NFT === 'true') {
+          const mockAddr = `mock-pntr-${tokenId}`;
+          ctx.db.setMintAddress(tokenId, mockAddr);
+          return JSON.stringify({ success: true, token_id: tokenId, mint_address: mockAddr, mock: true });
         }
         if (!ctx.nftMinter) {
           return JSON.stringify({ error: 'NFTMinter not initialized. Run setup_nft_collection first.' });

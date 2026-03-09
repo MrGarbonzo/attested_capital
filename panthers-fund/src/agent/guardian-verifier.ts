@@ -200,6 +200,13 @@ export async function verifyGuardianAttestation(
         error: `Guardian container measurement not approved: ${pccsResult.containerMeasurement}`,
       };
     }
+  } else {
+    // First-guardian auto-enrollment: accept and lock to this measurement
+    if (!pccsResult.containerMeasurement) {
+      return { valid: false, error: 'First guardian must provide container measurement for auto-enrollment' };
+    }
+    approvedMeasurements.add(pccsResult.containerMeasurement);
+    console.log(`[panthers-fund] First-guardian auto-enrollment: locked to measurement ${pccsResult.containerMeasurement}`);
   }
 
   return { valid: true, codeMeasurement: pccsResult.containerMeasurement };
