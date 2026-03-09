@@ -82,8 +82,9 @@ export function deployAgentVm(input: DeployAgentVmInput): DeployAgentVmResult {
   const envPath = writeTemp('agent.env', buildAgentEnv(input));
 
   try {
+    const apiKey = input.bootInput.secretAiApiKey;
     const cmd = [
-      'secretvm-cli', 'vm', 'create',
+      'secretvm-cli', '-k', apiKey, 'vm', 'create',
       '-n', 'panthers-agent',
       '-t', input.vmSize,
       '-d', composePath,
