@@ -2,12 +2,12 @@ version: "3.8"
 
 services:
   boot-agent:
-    build:
-      context: ..
-      dockerfile: boot-agent/Dockerfile
+    image: ghcr.io/mrgarbonzo/boot-agent:${BOOT_IMAGE_TAG:-latest}
     container_name: panthers-boot-agent
     restart: "no"
     env_file: .env
     volumes:
-      # Sealed config output — copy these files to guardian/agent VMs
-      - ./sealed-output:/mnt/secure/boot-config
+      - sealed-output:/mnt/secure/boot-config
+
+volumes:
+  sealed-output:

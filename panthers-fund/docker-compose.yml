@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   agent:
-    build: .
+    image: ghcr.io/mrgarbonzo/agent:${AGENT_IMAGE_TAG:-latest}
     container_name: panthers-agent
     restart: unless-stopped
     env_file: .env
@@ -10,22 +10,24 @@ services:
       - "8080:8080"
     volumes:
       - agent-data:/data
-      # Sealed config from boot-agent (SCP'd to this VM)
-      - ./sealed-config:/mnt/secure/boot-config:ro
+      # SecretVM crypto volumes (mounted by SecretVM runtime)
+      - /mnt/secure/docker_public_key_ed25519.pem:/mnt/secure/docker_public_key_ed25519.pem:ro
+      - /mnt/secure/docker_attestation_ed25519.txt:/mnt/secure/docker_attestation_ed25519.txt:ro
     environment:
       - STATUS_PORT=8080
       - PANTHERS_DB_PATH=/data/panthers.db
-      - AGENT_EXTERNAL_HOST=${AGENT_EXTERNAL_HOST:-localhost}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_GROUP_CHAT_ID=${TELEGRAM_GROUP_CHAT_ID:-}
-      - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS:-}
       - SECRET_AI_API_KEY=${SECRET_AI_API_KEY:-}
-      - SECRET_AI_BASE_URL=${SECRET_AI_BASE_URL:-https://secretai-rytn.scrtlabs.com:21434/v1}
       - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      - JUPITER_API_KEY=${JUPITER_API_KEY:-}
       - REGISTRY_PROGRAM_ID=${REGISTRY_PROGRAM_ID:-}
       - VAULT_KEY=${VAULT_KEY:-}
-      - BOOTSTRAP_GUARDIANS=${BOOTSTRAP_GUARDIANS:-}
       - APPROVED_MEASUREMENTS=${APPROVED_MEASUREMENTS:-}
+      - MOCK_NFT=${MOCK_NFT:-false}
+      - SECRETVM_SIGN_ENDPOINT=${SECRETVM_SIGN_ENDPOINT:-http://172.17.0.1:49153/sign}
+      - SECRETVM_PUBKEY_PEM_PATH=/mnt/secure/docker_public_key_ed25519.pem
+      - SECRETVM_ATTESTATION_PATH=/mnt/secure/docker_attestation_ed25519.txt
 
 volumes:
   agent-data:
