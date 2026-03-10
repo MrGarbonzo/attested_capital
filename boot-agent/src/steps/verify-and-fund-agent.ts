@@ -126,7 +126,9 @@ async function verifyQuoteViaPCCS(quote: string): Promise<PCCSResult> {
 
 export async function verifyAndFundAgent(input: VerifyAndFundAgentInput): Promise<VerifyAndFundAgentResult> {
   const port = input.agentPort ?? 8080;
-  const agentBaseUrl = `https://${input.agentDomain}:${port}`;
+  // Container speaks plain HTTP; SecretVM TLS proxy is on 443 but routes may not work.
+  // The attestation endpoint (:29343) is served by the SecretVM runtime itself (HTTPS).
+  const agentBaseUrl = `http://${input.agentDomain}:${port}`;
   const attestationUrl = `https://${input.agentDomain}:${ATTESTATION_PORT}/cpu.html`;
 
   console.log('[boot] ── Step 6: Verify agent attestation & fund wallet ──');
@@ -140,7 +142,7 @@ export async function verifyAndFundAgent(input: VerifyAndFundAgentInput): Promis
 
   while (Date.now() - start < POLL_TIMEOUT_MS) {
     try {
-      const res = await fetchWithTlsOverride(`${agentBaseUrl}/api/fund-address`);
+      const res = await fetch(`${agentBaseUrl}/api/fund-address`, { signal: AbortSignal.timeout(10_000) });
       if (res.ok) {
         const data = await res.json() as { solanaAddress?: string };
         if (data.solanaAddress) {
