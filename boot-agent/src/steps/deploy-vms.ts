@@ -28,6 +28,8 @@ export interface DeployAgentVmInput {
 
 export interface DeployAgentVmResult {
   agentVmId: string;
+  /** Agent VM domain (e.g. "gold-cougar.vm.scrtlabs.com"), if extractable from CLI output. */
+  agentDomain?: string;
 }
 
 const GHCR_REGISTRY = 'ghcr.io';
@@ -104,7 +106,16 @@ export function deployAgentVm(input: DeployAgentVmInput): DeployAgentVmResult {
     const agentVmId = idMatch?.[1] ?? 'unknown';
     console.log(`[boot] Agent VM created: ${agentVmId}`);
 
-    return { agentVmId };
+    // Extract domain from output (e.g. "gold-cougar.vm.scrtlabs.com")
+    const domainMatch = output.match(/([a-z]+-[a-z]+\.vm\.scrtlabs\.com)/i);
+    const agentDomain = domainMatch?.[1];
+    if (agentDomain) {
+      console.log(`[boot] Agent VM domain: ${agentDomain}`);
+    } else {
+      console.warn('[boot] Could not extract agent domain from CLI output');
+    }
+
+    return { agentVmId, agentDomain };
   } finally {
     try { unlinkSync(composePath); } catch { /* ignore */ }
     try { unlinkSync(envPath); } catch { /* ignore */ }

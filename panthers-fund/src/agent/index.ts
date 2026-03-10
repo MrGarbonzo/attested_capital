@@ -180,6 +180,17 @@ async function main() {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'internal error' }));
       }
+    } else if (req.method === 'GET' && req.url === '/api/fund-address') {
+      // Returns the agent's Solana address for boot-agent funding.
+      // No auth needed — the address is public info; attestation is verified separately.
+      try {
+        const solAddress = ctx.wallet.addresses.solana;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ solanaAddress: solAddress }));
+      } catch {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'wallet not initialized' }));
+      }
     } else if (req.method === 'POST' && req.url === '/api/attestation') {
       let body = '';
       req.on('data', (chunk: Buffer) => { body += chunk.toString(); });

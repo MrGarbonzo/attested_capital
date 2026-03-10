@@ -30,6 +30,8 @@ export interface DeployRegistryInput {
 
 export interface DeployRegistryResult {
   programId: string;
+  /** Raw deployer secret key (64 bytes). Caller should transfer remaining SOL then zero this. */
+  payerSecretKey: Uint8Array;
 }
 
 async function waitForFunding(connection: Connection, publicKey: import('@solana/web3.js').PublicKey): Promise<void> {
@@ -106,7 +108,10 @@ export async function deployRegistry(input: DeployRegistryInput): Promise<Deploy
     const programId = programKeypair.publicKey.toBase58();
     console.log(`[boot] Registry deployed at: ${programId}`);
 
-    return { programId };
+    // Keep payer secret key so caller can transfer remaining SOL to the agent
+    const payerSecretKey = Uint8Array.from(payerKeypair.secretKey);
+
+    return { programId, payerSecretKey };
   } finally {
     try { unlinkSync(payerKeypairPath); } catch { /* ignore */ }
     try { unlinkSync(programKeypairPath); } catch { /* ignore */ }

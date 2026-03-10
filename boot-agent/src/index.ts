@@ -6,8 +6,9 @@
  *   2. Generates vault key
  *   3. Deploys Solana registry program (or verifies existing)
  *   4. Writes sealed configs to disk (backup)
- *   5. Deploys agent + guardian VMs via secretvm-cli with secrets injected
- *   6. Exits — never needs to run again
+ *   5. Deploys agent VM via secretvm-cli with secrets injected
+ *   6. Verifies agent TEE attestation & transfers remaining deployer SOL
+ *   7. Exits — never needs to run again
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -16,6 +17,7 @@ import { writeSealedConfig } from './steps/write-sealed-config.js';
 import { verifyRegistry } from './steps/verify-registry.js';
 import { deployRegistry } from './steps/deploy-registry.js';
 import { deployAgentVm } from './steps/deploy-vms.js';
+import { verifyAndFundAgent } from './steps/verify-and-fund-agent.js';
 import type { BootInput } from './config.js';
 
 function requireEnv(name: string): string {
@@ -84,6 +86,7 @@ async function main(): Promise<void> {
 
   // ── Step 3: Resolve registry program ID (deploy or verify) ──
   let registryProgramId = process.env.REGISTRY_PROGRAM_ID;
+  let payerSecretKey: Uint8Array | undefined;
 
   if (registryProgramId) {
     console.log(`[boot] REGISTRY_PROGRAM_ID set: ${registryProgramId} — verifying on-chain`);
@@ -92,6 +95,7 @@ async function main(): Promise<void> {
     console.log('[boot] REGISTRY_PROGRAM_ID not set — deploying registry program');
     const result = await deployRegistry({ rpcUrl: bootInput.solanaRpcUrl });
     registryProgramId = result.programId;
+    payerSecretKey = result.payerSecretKey;
     await verifyRegistry(bootInput.solanaRpcUrl, registryProgramId);
   }
 
@@ -113,7 +117,7 @@ async function main(): Promise<void> {
   const devMode = process.env.DEV_MODE === 'true';
 
   console.log(`[boot] Step 5: Deploy agent VM (image=${agentImageTag}, size=${vmSize}, dev=${devMode})`);
-  const { agentVmId } = deployAgentVm({
+  const { agentVmId, agentDomain } = deployAgentVm({
     bootInput,
     registryProgramId,
     vaultKeyHex,
@@ -122,11 +126,42 @@ async function main(): Promise<void> {
     devMode,
   });
 
+  // ── Step 6: Verify agent attestation & fund wallet ────────
+  if (payerSecretKey && agentDomain) {
+    console.log('[boot] Step 6: Verify agent TEE attestation & transfer SOL');
+    const fundResult = await verifyAndFundAgent({
+      agentDomain,
+      payerSecretKey,
+      rpcUrl: bootInput.solanaRpcUrl,
+    });
+
+    if (fundResult.success) {
+      console.log(`[boot] Agent verified & funded: ${fundResult.solTransferred?.toFixed(4)} SOL → ${fundResult.agentAddress}`);
+      if (fundResult.containerMeasurement) {
+        console.log(`[boot] Agent RTMR3: ${fundResult.containerMeasurement}`);
+      }
+    } else {
+      console.error(`[boot] Agent verification/funding failed: ${fundResult.error}`);
+      console.error('[boot] Agent may not be able to register on-chain. Manual funding required.');
+    }
+
+    // Zero the deployer secret key
+    payerSecretKey.fill(0);
+  } else {
+    if (!payerSecretKey) {
+      console.log('[boot] Step 6: Skipped — using existing registry (no deployer keypair)');
+    }
+    if (!agentDomain) {
+      console.warn('[boot] Step 6: Skipped — could not determine agent domain');
+    }
+  }
+
   // ── Done ─────────────────────────────────────────────────
   console.log('[boot] ════════════════════════════════════════');
   console.log('[boot] Boot sequence complete');
   console.log(`[boot]   Registry: ${registryProgramId}`);
   console.log(`[boot]   Agent VM: ${agentVmId}`);
+  console.log(`[boot]   Agent domain: ${agentDomain ?? 'unknown'}`);
   console.log(`[boot]   Agent config: ${agentConfigPath}`);
   console.log(`[boot]   Registry ID: ${registryIdPath}`);
   console.log('[boot] ════════════════════════════════════════');
