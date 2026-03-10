@@ -53,6 +53,7 @@ services:
       - "8080:8080"
     volumes:
       - agent-data:/data
+      - /mnt/secure/system_info.json:/mnt/secure/system_info.json:ro
     env_file: .env
 
 volumes:

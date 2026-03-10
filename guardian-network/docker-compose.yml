@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   guardian:
-    image: ghcr.io/mrgarbonzo/guardian:${GUARDIAN_IMAGE_TAG:-latest}
+    image: ghcr.io/mrgarbonzo/guardian:main-afefaf2
     container_name: panthers-guardian
     restart: unless-stopped
     env_file: .env
@@ -24,7 +24,7 @@ services:
       - SECRETVM_ATTESTATION_PATH=/mnt/secure/docker_attestation_ed25519.txt
       - GUARDIAN_TELEGRAM_BOT_TOKEN=${GUARDIAN_TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_GROUP_CHAT_ID=${TELEGRAM_GROUP_CHAT_ID:-}
-      - REGISTRY_PROGRAM_ID=${REGISTRY_PROGRAM_ID:-}
+      - REGISTRY_PROGRAM_ID=6k3BkyGhqCrG8zH8G9iEd14UgDvdyApX4cY4c4tX8jxi
       - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
       - APPROVED_MEASUREMENTS=${APPROVED_MEASUREMENTS:-}
 

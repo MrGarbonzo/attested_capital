@@ -28,7 +28,6 @@ VOLUME /data
 
 ENV DB_PATH=/data/guardian.db
 ENV PORT=3100
-ENV REGISTRY_PROGRAM_ID=6k3BkyGhqCrG8zH8G9iEd14UgDvdyApX4cY4c4tX8jxi
 ENV SOLANA_RPC_URL=https://api.devnet.solana.com
 
 EXPOSE 3100

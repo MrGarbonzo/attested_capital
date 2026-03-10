@@ -10,6 +10,7 @@ services:
       - "8080:8080"
     volumes:
       - panthers-data:/data
+      - /mnt/secure/system_info.json:/mnt/secure/system_info.json:ro
     init: true
     restart: unless-stopped
     env_file:

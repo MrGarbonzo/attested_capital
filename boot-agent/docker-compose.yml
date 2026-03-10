@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   boot-agent:
-    image: ghcr.io/mrgarbonzo/boot-agent:${BOOT_IMAGE_TAG:-latest}
+    image: ghcr.io/mrgarbonzo/boot-agent:main-90a238f
     container_name: panthers-boot-agent
     restart: "no"
     env_file: .env
