@@ -20,7 +20,7 @@ services:
       - DB_PATH=/data/guardian.db
       - SECRETVM_PUBKEY_PEM_PATH=/mnt/secure/crypto/docker_public_key_ed25519.pem
       - SECRETVM_ATTESTATION_PATH=/mnt/secure/crypto/docker_attestation_ed25519.txt
-      - REGISTRY_PROGRAM_ID=D8bBfaCiVegnkvHBWSEVvZw8XfQWYWS1n9EimkFZyzZ2
+      - REGISTRY_PROGRAM_ID=FiXHE3ywPRSrGfXCeJTUvFMZDDHXWTZp8Rb33Af4Ypcw
 
 volumes:
   guardian-data:
