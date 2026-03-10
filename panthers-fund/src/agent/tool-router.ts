@@ -32,7 +32,7 @@ const RULES: CategoryRule[] = [
   },
   {
     categories: ['sales', 'accounts'],
-    keywords: /\b(buy|purchase|price|pricing|mint|auction|flash|offer|negotiate|sales? stats?|how much|cost|deal|discount|cheap|afford|grab one|get one|for \$|willing to pay|bargain|haggle)\b|\$\d/i,
+    keywords: /\b(buy|purchase|price|pricing|mint|auction|flash|offer|negotiate|sales? stats?|how much|cost|deal|discount|cheap|afford|grab one|get one|sell me|for \$|willing to pay|bargain|haggle|i want|i'd like|gimme|hook me up)\b|\$\d/i,
   },
   {
     categories: ['marketplace'],

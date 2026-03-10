@@ -13,6 +13,7 @@ import { verifyGuardianAttestation, verifyQuoteViaPCCS } from './guardian-verifi
 import { aesEncrypt } from './tee-signing.js';
 import { SolanaRegistryClient } from '../registry/solana-registry-client.js';
 import { Connection, PublicKey } from '@solana/web3.js';
+import { existsSync, readFileSync } from 'node:fs';
 import { ResilientLLM } from './resilient-llm.js';
 import { VaultKeyManager } from '../vault/key-manager.js';
 import { handleConfigRequest } from './config-api.js';
@@ -23,6 +24,27 @@ function requireEnv(name: string): string {
   const val = process.env[name];
   if (!val) throw new Error(`Missing required env var: ${name}`);
   return val;
+}
+
+/** Discover public hostname from AGENT_EXTERNAL_HOST env, SecretVM system_info.json, or fallback. */
+function discoverHostname(): string {
+  const envHost = process.env.AGENT_EXTERNAL_HOST;
+  if (envHost) return envHost;
+
+  // SecretVM writes system info with the VM domain
+  const systemInfoPath = '/mnt/secure/system_info.json';
+  if (existsSync(systemInfoPath)) {
+    try {
+      const info = JSON.parse(readFileSync(systemInfoPath, 'utf-8')) as Record<string, unknown>;
+      const domain = info.vmDomain ?? info.vm_domain ?? info.domain;
+      if (typeof domain === 'string' && domain.length > 0) {
+        console.log(`[panthers-fund] Auto-discovered hostname: ${domain}`);
+        return domain;
+      }
+    } catch { /* fall through */ }
+  }
+
+  return 'localhost';
 }
 
 async function main() {
@@ -422,7 +444,7 @@ async function main() {
       try {
         await registryClient.registerSelf({
           entityType: 'agent',
-          endpoint: `https://${process.env.AGENT_EXTERNAL_HOST ?? 'localhost'}:${statusPort}`,
+          endpoint: `https://${discoverHostname()}:${statusPort}`,
           teeInstanceId: teeIdentity.instanceId,
           codeHash: teeIdentity.codeHash,
           attestationHash: '',
@@ -550,7 +572,7 @@ async function main() {
   }
 
   // ── Start cron jobs ─────────────────────────────────────────
-  const agentEndpoint = `https://${process.env.AGENT_EXTERNAL_HOST ?? 'localhost'}:${statusPort}`;
+  const agentEndpoint = `https://${discoverHostname()}:${statusPort}`;
   startCronJobs(ctx, bot, {
     alertChatId: process.env.TELEGRAM_ALERT_CHAT_ID,
     vaultClient,
