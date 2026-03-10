@@ -14,6 +14,7 @@ import { aesEncrypt } from './tee-signing.js';
 import { SolanaRegistryClient } from '../registry/solana-registry-client.js';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { existsSync, readFileSync } from 'node:fs';
+import { reverse } from 'node:dns/promises';
 import { ResilientLLM } from './resilient-llm.js';
 import { VaultKeyManager } from '../vault/key-manager.js';
 import { handleConfigRequest } from './config-api.js';
@@ -26,8 +27,8 @@ function requireEnv(name: string): string {
   return val;
 }
 
-/** Discover public hostname from AGENT_EXTERNAL_HOST env, SecretVM system_info.json, or fallback. */
-function discoverHostname(): string {
+/** Discover public hostname from env, system_info.json, or reverse DNS. */
+async function discoverHostname(): Promise<string> {
   const envHost = process.env.AGENT_EXTERNAL_HOST;
   if (envHost) return envHost;
 
@@ -38,11 +39,25 @@ function discoverHostname(): string {
       const info = JSON.parse(readFileSync(systemInfoPath, 'utf-8')) as Record<string, unknown>;
       const domain = info.vmDomain ?? info.vm_domain ?? info.domain;
       if (typeof domain === 'string' && domain.length > 0) {
-        console.log(`[panthers-fund] Auto-discovered hostname: ${domain}`);
+        console.log(`[panthers-fund] Auto-discovered hostname from system_info: ${domain}`);
         return domain;
       }
     } catch { /* fall through */ }
   }
+
+  // Reverse DNS: fetch public IP then resolve to hostname
+  try {
+    const res = await fetch('https://ifconfig.me/ip', { signal: AbortSignal.timeout(5_000) });
+    if (res.ok) {
+      const ip = (await res.text()).trim();
+      const hostnames = await reverse(ip);
+      const vmDomain = hostnames.find(h => h.includes('.vm.scrtlabs.com'));
+      if (vmDomain) {
+        console.log(`[panthers-fund] Auto-discovered hostname via reverse DNS: ${vmDomain}`);
+        return vmDomain;
+      }
+    }
+  } catch { /* fall through */ }
 
   return 'localhost';
 }
@@ -455,7 +470,7 @@ async function main() {
       try {
         await registryClient.registerSelf({
           entityType: 'agent',
-          endpoint: `https://${discoverHostname()}:${statusPort}`,
+          endpoint: `https://${await discoverHostname()}:${statusPort}`,
           teeInstanceId: teeIdentity.instanceId,
           codeHash: teeIdentity.codeHash,
           attestationHash: '',
@@ -583,7 +598,7 @@ async function main() {
   }
 
   // ── Start cron jobs ─────────────────────────────────────────
-  const agentEndpoint = `https://${discoverHostname()}:${statusPort}`;
+  const agentEndpoint = `https://${await discoverHostname()}:${statusPort}`;
   startCronJobs(ctx, bot, {
     alertChatId: process.env.TELEGRAM_ALERT_CHAT_ID,
     vaultClient,
