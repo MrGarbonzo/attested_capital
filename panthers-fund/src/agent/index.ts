@@ -410,7 +410,7 @@ async function main() {
   const llm = new ResilientLLM({
     baseUrl: process.env.SECRET_AI_BASE_URL ?? 'https://secretai-rytn.scrtlabs.com:21434/v1',
     apiKey: requireEnv('SECRET_AI_API_KEY'),
-    model: process.env.SECRET_AI_MODEL ?? 'qwen3:8b',
+    model: process.env.SECRET_AI_MODEL ?? 'llama3.3:70b',
   });
 
   // ── Create Sentiment LLM client (DeepSeek for sentiment analysis) ──
