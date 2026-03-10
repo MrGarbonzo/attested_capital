@@ -16,6 +16,8 @@ RUN PT_CACHE="/root/.cache/solana/v1.43/platform-tools" && \
 
 COPY solana-registry/Cargo.toml solana-registry/Anchor.toml ./
 COPY solana-registry/programs/ programs/
+# Place the fixed program keypair where Anchor expects it so declare_id! matches
+COPY solana-registry/program-keypair.json target/deploy/solana_registry-keypair.json
 RUN solana-keygen new --no-bip39-passphrase -o /root/.config/solana/id.json && anchor build --no-idl
 
 # ── Stage 2: Build boot-agent TypeScript ───────────────────────
