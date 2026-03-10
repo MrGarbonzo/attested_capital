@@ -54,6 +54,10 @@ services:
     volumes:
       - agent-data:/data
       - /mnt/secure/system_info.json:/mnt/secure/system_info.json:ro
+      - /mnt/secure/self_report.txt:/mnt/secure/self_report.txt:ro
+      - /mnt/secure/tdx_attestation.txt:/mnt/secure/tdx_attestation.txt:ro
+      - /mnt/secure/docker_public_key_ed25519.pem:/mnt/secure/docker_public_key_ed25519.pem:ro
+      - /mnt/secure/docker_attestation_ed25519.txt:/mnt/secure/docker_attestation_ed25519.txt:ro
     env_file: .env
 
 volumes:

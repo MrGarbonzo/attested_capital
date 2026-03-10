@@ -130,21 +130,25 @@ export async function createTEESigner(): Promise<TEESigner> {
   const isSecretVM = existsSync(SECRETVM_PUBKEY_PEM_PATH);
 
   if (isSecretVM) {
-    const ed25519PubkeyRaw = loadEd25519PubkeyFromPEM(SECRETVM_PUBKEY_PEM_PATH);
-    const ed25519PubkeyBase64 = ed25519PubkeyRaw.toString('base64');
-    const x25519 = createX25519Keypair();
-    const x25519PubkeyBase64 = x25519.pubkeyRaw.toString('base64');
-    const x25519Signature = await signViaSecretVM(x25519.pubkeyRaw);
+    try {
+      const ed25519PubkeyRaw = loadEd25519PubkeyFromPEM(SECRETVM_PUBKEY_PEM_PATH);
+      const ed25519PubkeyBase64 = ed25519PubkeyRaw.toString('base64');
+      const x25519 = createX25519Keypair();
+      const x25519PubkeyBase64 = x25519.pubkeyRaw.toString('base64');
+      const x25519Signature = await signViaSecretVM(x25519.pubkeyRaw);
 
-    return {
-      ed25519PubkeyBase64,
-      x25519PubkeyBase64,
-      x25519Signature,
-      isProduction: true,
-      async sign(data) { return signViaSecretVM(data); },
-      verify: verifyEd25519,
-      ecdh(peerPub) { return computeECDH(x25519.privateKey, Buffer.from(peerPub, 'base64')); },
-    };
+      return {
+        ed25519PubkeyBase64,
+        x25519PubkeyBase64,
+        x25519Signature,
+        isProduction: true,
+        async sign(data) { return signViaSecretVM(data); },
+        verify: verifyEd25519,
+        ecdh(peerPub) { return computeECDH(x25519.privateKey, Buffer.from(peerPub, 'base64')); },
+      };
+    } catch (err) {
+      console.warn(`[tee-signing] SecretVM PEM/signing failed, falling back to dev mode: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   // Dev mode

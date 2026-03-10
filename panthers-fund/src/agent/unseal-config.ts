@@ -12,29 +12,37 @@ import { unseal, deriveSealingKey, type SealedFile } from './seal.js';
 
 const SEALED_CONFIG_PATH = '/mnt/secure/boot-config/agent.sealed.json';
 
+/** SecretVM paths for TEE measurements. */
+const SECRETVM_SELF_REPORT_PATH = '/mnt/secure/self_report.txt';
+const SECRETVM_TDX_ATTESTATION_PATH = '/mnt/secure/tdx_attestation.txt';
+
 /** TEE identity resolution — matches boot-agent/src/index.ts logic. */
 function getBootTeeInstanceId(): string {
-  const teePath = '/dev/attestation/quote';
-  if (existsSync(teePath)) {
+  // Try SecretVM attestation quote
+  if (existsSync(SECRETVM_TDX_ATTESTATION_PATH)) {
     try {
-      const quote = readFileSync(teePath);
+      const quote = readFileSync(SECRETVM_TDX_ATTESTATION_PATH);
       return createHash('sha256').update(quote).digest('hex').substring(0, 16);
+    } catch { /* fall through */ }
+  }
+  // Try SecretVM self_report
+  if (existsSync(SECRETVM_SELF_REPORT_PATH)) {
+    try {
+      const report = readFileSync(SECRETVM_SELF_REPORT_PATH);
+      return createHash('sha256').update(report).digest('hex').substring(0, 16);
     } catch { /* fall through */ }
   }
   return 'dev-boot-agent';
 }
 
 function getBootCodeHash(): string {
-  // Must match boot-agent/src/index.ts getCodeHash() — RTMR3 first
-  const rtmr3Path = '/dev/attestation/rtmr3';
-  if (existsSync(rtmr3Path)) {
-    try { return readFileSync(rtmr3Path, 'utf-8').trim(); }
-    catch { /* fall through */ }
-  }
-  const mrPath = '/dev/attestation/mr_enclave';
-  if (existsSync(mrPath)) {
-    try { return readFileSync(mrPath, 'utf-8').trim(); }
-    catch { /* fall through */ }
+  // Try RTMR3 from SecretVM self_report.txt
+  if (existsSync(SECRETVM_SELF_REPORT_PATH)) {
+    try {
+      const report = readFileSync(SECRETVM_SELF_REPORT_PATH, 'utf-8');
+      const match = report.match(/RTMR3:\s*([0-9a-fA-F]+)/);
+      if (match) return match[1];
+    } catch { /* fall through */ }
   }
   return createHash('sha256').update('boot-agent-dev').digest('hex');
 }

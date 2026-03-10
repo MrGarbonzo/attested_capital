@@ -29,6 +29,10 @@ export interface TEEIdentity {
 const TDX_GUEST_DEVICE = '/dev/tdx_guest';
 /** Path to TDX report (via configfs-tsm). */
 const TDX_REPORT_PATH = '/sys/kernel/config/tsm/report';
+/** SecretVM self_report.txt with RTMR values. */
+const SECRETVM_SELF_REPORT_PATH = '/mnt/secure/self_report.txt';
+/** SecretVM full attestation quote. */
+const SECRETVM_TDX_ATTESTATION_PATH = '/mnt/secure/tdx_attestation.txt';
 /** Fallback: SecretVM attestation endpoint. */
 const SECRETVM_ATTESTATION_URL = 'http://169.254.169.254/attestation';
 
@@ -43,13 +47,25 @@ const SECRETVM_ATTESTATION_URL = 'http://169.254.169.254/attestation';
 export async function getTEEInstanceId(): Promise<TEEIdentity> {
   const codeHash = getCodeHash();
 
-  // Try TDX guest device
-  if (existsSync(TDX_GUEST_DEVICE)) {
+  // Try SecretVM self_report.txt (contains MRTD + RTMR values as text)
+  if (existsSync(SECRETVM_SELF_REPORT_PATH)) {
     try {
-      const instanceId = await getTDXInstanceId();
+      const report = readFileSync(SECRETVM_SELF_REPORT_PATH, 'utf-8');
+      const instanceId = createHash('sha256').update(report).digest('hex').slice(0, 32);
       return { instanceId, isTDX: true, codeHash };
     } catch {
-      // Fall through to next method
+      // Fall through
+    }
+  }
+
+  // Try SecretVM full attestation quote
+  if (existsSync(SECRETVM_TDX_ATTESTATION_PATH)) {
+    try {
+      const quote = readFileSync(SECRETVM_TDX_ATTESTATION_PATH, 'utf-8');
+      const instanceId = createHash('sha256').update(quote).digest('hex').slice(0, 32);
+      return { instanceId, isTDX: true, codeHash };
+    } catch {
+      // Fall through
     }
   }
 
@@ -138,9 +154,18 @@ function getDevInstanceId(): string {
  *   3. package.json hash (dev fallback)
  */
 function getCodeHash(): string {
-  // Try RTMR3 from SecretVM attestation API (set by boot-agent or runtime)
+  // Try RTMR3 from env (set by boot-agent or runtime)
   const rtmr3Env = process.env.RTMR3;
   if (rtmr3Env) return rtmr3Env;
+
+  // Try RTMR3 from SecretVM self_report.txt
+  if (existsSync(SECRETVM_SELF_REPORT_PATH)) {
+    try {
+      const report = readFileSync(SECRETVM_SELF_REPORT_PATH, 'utf-8');
+      const match = report.match(/RTMR3:\s*([0-9a-fA-F]+)/);
+      if (match) return match[1];
+    } catch { /* fall through */ }
+  }
 
   // Try Docker container ID (available inside containers)
   try {

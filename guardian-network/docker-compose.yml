@@ -10,23 +10,18 @@ services:
       - "3100:3100"
     volumes:
       - guardian-data:/data
-      # SecretVM crypto volumes (mounted by SecretVM runtime)
+      # SecretVM secure volumes
+      - /mnt/secure/system_info.json:/mnt/secure/system_info.json:ro
+      - /mnt/secure/self_report.txt:/mnt/secure/self_report.txt:ro
+      - /mnt/secure/tdx_attestation.txt:/mnt/secure/tdx_attestation.txt:ro
       - /mnt/secure/docker_public_key_ed25519.pem:/mnt/secure/docker_public_key_ed25519.pem:ro
       - /mnt/secure/docker_attestation_ed25519.txt:/mnt/secure/docker_attestation_ed25519.txt:ro
     environment:
-      - GUARDIAN_ADDRESS=${GUARDIAN_ADDRESS:-guardian-1}
       - PORT=3100
-      - GUARDIAN_EXTERNAL_ENDPOINT=${GUARDIAN_EXTERNAL_ENDPOINT:-http://0.0.0.0:3100}
       - DB_PATH=/data/guardian.db
-      - IS_SENTRY=${IS_SENTRY:-true}
-      - SECRETVM_SIGN_ENDPOINT=${SECRETVM_SIGN_ENDPOINT:-http://172.17.0.1:49153/sign}
       - SECRETVM_PUBKEY_PEM_PATH=/mnt/secure/docker_public_key_ed25519.pem
       - SECRETVM_ATTESTATION_PATH=/mnt/secure/docker_attestation_ed25519.txt
-      - GUARDIAN_TELEGRAM_BOT_TOKEN=${GUARDIAN_TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_GROUP_CHAT_ID=${TELEGRAM_GROUP_CHAT_ID:-}
       - REGISTRY_PROGRAM_ID=6k3BkyGhqCrG8zH8G9iEd14UgDvdyApX4cY4c4tX8jxi
-      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
-      - APPROVED_MEASUREMENTS=${APPROVED_MEASUREMENTS:-}
 
 volumes:
   guardian-data:
