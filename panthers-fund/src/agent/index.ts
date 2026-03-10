@@ -195,6 +195,45 @@ async function main() {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'internal error' }));
       }
+    } else if (req.method === 'POST' && req.url === '/api/set-hostname') {
+      // Called by boot-agent after VM creation to set the external hostname.
+      // Triggers re-registration on-chain with the correct endpoint.
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const { hostname } = JSON.parse(body) as { hostname: string };
+          if (!hostname) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'missing hostname' }));
+            return;
+          }
+          console.log(`[panthers-fund] Hostname set by boot-agent: ${hostname}`);
+          // Re-register on-chain with the correct endpoint
+          if (registryClient && teeIdentity) {
+            const endpoint = `http://${hostname}:${statusPort}`;
+            await registryClient.registerSelf({
+              entityType: 'agent',
+              endpoint,
+              teeInstanceId: teeIdentity.instanceId,
+              codeHash: teeIdentity.codeHash,
+              attestationHash: '',
+              ed25519Pubkey: signer?.ed25519PubkeyBase64 ?? '',
+              isActive: true,
+            });
+            registeredOnChain.value = true;
+            console.log(`[panthers-fund] Re-registered on-chain with endpoint: ${endpoint}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, endpoint }));
+          } else {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'registry client not initialized' }));
+          }
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : 'internal error' }));
+        }
+      });
     } else if (req.method === 'GET' && req.url === '/api/fund-address') {
       // Returns the agent's Solana address for boot-agent funding.
       // No auth needed — the address is public info; attestation is verified separately.

@@ -229,6 +229,27 @@ export async function verifyAndFundAgent(input: VerifyAndFundAgentInput): Promis
     const transferred = transferLamports / LAMPORTS_PER_SOL;
     console.log(`[boot] Transferred ${transferred.toFixed(4)} SOL to agent (tx: ${sig})`);
 
+    // ── 5. Notify agent of its external hostname ────────────────
+    // The agent can't discover its own hostname (reverse DNS fails on SecretVM).
+    // Tell it, so it can re-register on-chain with the correct endpoint.
+    try {
+      console.log(`[boot] Notifying agent of hostname: ${input.agentDomain}`);
+      const hostnameRes = await fetch(`${agentBaseUrl}/api/set-hostname`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostname: input.agentDomain }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (hostnameRes.ok) {
+        const result = await hostnameRes.json() as { ok?: boolean; endpoint?: string };
+        console.log(`[boot] Agent re-registered with endpoint: ${result.endpoint}`);
+      } else {
+        console.warn(`[boot] Agent hostname notification failed: ${hostnameRes.status}`);
+      }
+    } catch (err) {
+      console.warn(`[boot] Agent hostname notification error: ${err instanceof Error ? err.message : err}`);
+    }
+
     return {
       success: true,
       agentAddress,
