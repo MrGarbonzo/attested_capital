@@ -56,9 +56,11 @@ services:
       - /mnt/secure/system_info.json:/mnt/secure/system_info.json:ro
       - /mnt/secure/self_report.txt:/mnt/secure/self_report.txt:ro
       - /mnt/secure/tdx_attestation.txt:/mnt/secure/tdx_attestation.txt:ro
-      - /mnt/secure/docker_public_key_ed25519.pem:/mnt/secure/docker_public_key_ed25519.pem:ro
-      - /mnt/secure/docker_attestation_ed25519.txt:/mnt/secure/docker_attestation_ed25519.txt:ro
+      - /mnt/secure/docker_wd/crypto:/mnt/secure/crypto:ro
     env_file: .env
+    environment:
+      - SECRETVM_PUBKEY_PEM_PATH=/mnt/secure/crypto/docker_public_key_ed25519.pem
+      - SECRETVM_ATTESTATION_PATH=/mnt/secure/crypto/docker_attestation_ed25519.txt
 
 volumes:
   agent-data:

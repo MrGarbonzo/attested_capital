@@ -14,13 +14,12 @@ services:
       - /mnt/secure/system_info.json:/mnt/secure/system_info.json:ro
       - /mnt/secure/self_report.txt:/mnt/secure/self_report.txt:ro
       - /mnt/secure/tdx_attestation.txt:/mnt/secure/tdx_attestation.txt:ro
-      - /mnt/secure/docker_public_key_ed25519.pem:/mnt/secure/docker_public_key_ed25519.pem:ro
-      - /mnt/secure/docker_attestation_ed25519.txt:/mnt/secure/docker_attestation_ed25519.txt:ro
+      - /mnt/secure/docker_wd/crypto:/mnt/secure/crypto:ro
     environment:
       - PORT=3100
       - DB_PATH=/data/guardian.db
-      - SECRETVM_PUBKEY_PEM_PATH=/mnt/secure/docker_public_key_ed25519.pem
-      - SECRETVM_ATTESTATION_PATH=/mnt/secure/docker_attestation_ed25519.txt
+      - SECRETVM_PUBKEY_PEM_PATH=/mnt/secure/crypto/docker_public_key_ed25519.pem
+      - SECRETVM_ATTESTATION_PATH=/mnt/secure/crypto/docker_attestation_ed25519.txt
       - REGISTRY_PROGRAM_ID=6k3BkyGhqCrG8zH8G9iEd14UgDvdyApX4cY4c4tX8jxi
 
 volumes:
