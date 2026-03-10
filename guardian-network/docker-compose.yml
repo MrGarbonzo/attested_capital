@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   guardian:
-    image: ghcr.io/mrgarbonzo/guardian:main-afefaf2
+    image: ghcr.io/mrgarbonzo/guardian:main-7d5c9f1
     container_name: panthers-guardian
     restart: unless-stopped
     env_file: .env
