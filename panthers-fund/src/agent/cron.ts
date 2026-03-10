@@ -211,12 +211,16 @@ export function startCronJobs(ctx: ServiceContext, bot: Bot, config: CronConfig)
     const guardians = config.discoveredGuardians;
 
     cron.schedule('*/5 * * * *', async () => {
-      // Retry self-registration if not yet registered
+      // Retry self-registration if not yet registered (skip if no endpoint known)
       if (config.registeredOnChain && !config.registeredOnChain.value) {
+        if (!config.agentEndpoint) {
+          console.log('[cron] Skipping registry retry — no endpoint set yet (waiting for /api/set-hostname)');
+          return;
+        }
         try {
           await registry.registerSelf({
             entityType: 'agent',
-            endpoint: config.agentEndpoint ?? '',
+            endpoint: config.agentEndpoint,
             teeInstanceId: config.teeInstanceId ?? '',
             codeHash: config.codeHash ?? '',
             attestationHash: '',

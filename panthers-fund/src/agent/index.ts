@@ -13,8 +13,6 @@ import { verifyGuardianAttestation, verifyQuoteViaPCCS } from './guardian-verifi
 import { aesEncrypt } from './tee-signing.js';
 import { SolanaRegistryClient } from '../registry/solana-registry-client.js';
 import { Connection, PublicKey } from '@solana/web3.js';
-import { existsSync, readFileSync } from 'node:fs';
-import { reverse } from 'node:dns/promises';
 import { ResilientLLM } from './resilient-llm.js';
 import { VaultKeyManager } from '../vault/key-manager.js';
 import { handleConfigRequest } from './config-api.js';
@@ -27,40 +25,8 @@ function requireEnv(name: string): string {
   return val;
 }
 
-/** Discover public hostname from env, system_info.json, or reverse DNS. */
-async function discoverHostname(): Promise<string> {
-  const envHost = process.env.AGENT_EXTERNAL_HOST;
-  if (envHost) return envHost;
-
-  // SecretVM writes system info with the VM domain
-  const systemInfoPath = '/mnt/secure/system_info.json';
-  if (existsSync(systemInfoPath)) {
-    try {
-      const info = JSON.parse(readFileSync(systemInfoPath, 'utf-8')) as Record<string, unknown>;
-      const domain = info.vmDomain ?? info.vm_domain ?? info.domain;
-      if (typeof domain === 'string' && domain.length > 0) {
-        console.log(`[panthers-fund] Auto-discovered hostname from system_info: ${domain}`);
-        return domain;
-      }
-    } catch { /* fall through */ }
-  }
-
-  // Reverse DNS: fetch public IP then resolve to hostname
-  try {
-    const res = await fetch('https://ifconfig.me/ip', { signal: AbortSignal.timeout(5_000) });
-    if (res.ok) {
-      const ip = (await res.text()).trim();
-      const hostnames = await reverse(ip);
-      const vmDomain = hostnames.find(h => h.includes('.vm.scrtlabs.com'));
-      if (vmDomain) {
-        console.log(`[panthers-fund] Auto-discovered hostname via reverse DNS: ${vmDomain}`);
-        return vmDomain;
-      }
-    }
-  } catch { /* fall through */ }
-
-  return 'localhost';
-}
+/** Current hostname — set via AGENT_EXTERNAL_HOST env or /api/set-hostname. */
+let currentHostname: string | undefined = process.env.AGENT_EXTERNAL_HOST;
 
 async function main() {
   // Unseal boot-agent config before reading env vars
@@ -208,8 +174,9 @@ async function main() {
             res.end(JSON.stringify({ error: 'missing hostname' }));
             return;
           }
+          currentHostname = hostname;
           console.log(`[panthers-fund] Hostname set by boot-agent: ${hostname}`);
-          // Re-register on-chain with the correct endpoint
+          // Register/re-register on-chain with the correct endpoint
           if (registryClient && teeIdentity) {
             const endpoint = `http://${hostname}:${statusPort}`;
             await registryClient.registerSelf({
@@ -504,12 +471,12 @@ async function main() {
       registryProgramId,
     );
 
-    // Register self in registry
-    if (teeIdentity) {
+    // Register self in registry — only if hostname is known
+    if (teeIdentity && currentHostname) {
       try {
         await registryClient.registerSelf({
           entityType: 'agent',
-          endpoint: `https://${await discoverHostname()}:${statusPort}`,
+          endpoint: `http://${currentHostname}:${statusPort}`,
           teeInstanceId: teeIdentity.instanceId,
           codeHash: teeIdentity.codeHash,
           attestationHash: '',
@@ -521,6 +488,8 @@ async function main() {
       } catch (err) {
         console.warn(`[panthers-fund] Registry self-registration failed (will retry via cron): ${err instanceof Error ? err.message : err}`);
       }
+    } else if (teeIdentity && !currentHostname) {
+      console.log('[panthers-fund] Deferring on-chain registration — waiting for /api/set-hostname');
     }
 
     // Discover guardians from registry
@@ -637,7 +606,7 @@ async function main() {
   }
 
   // ── Start cron jobs ─────────────────────────────────────────
-  const agentEndpoint = `https://${await discoverHostname()}:${statusPort}`;
+  const agentEndpoint = currentHostname ? `http://${currentHostname}:${statusPort}` : undefined;
   startCronJobs(ctx, bot, {
     alertChatId: process.env.TELEGRAM_ALERT_CHAT_ID,
     vaultClient,
@@ -668,7 +637,7 @@ async function main() {
     `${registryLine}\n` +
     `On-chain: ${regStatus}\n` +
     `Guardians: ${guardianCount} verified\n` +
-    `Endpoint: ${agentEndpoint}`;
+    `Endpoint: ${agentEndpoint ?? 'pending (waiting for /api/set-hostname)'}`;
 
   const alertChatId = process.env.TELEGRAM_ALERT_CHAT_ID;
   if (alertChatId) await sendAlert(bot, alertChatId, onlineMsg);

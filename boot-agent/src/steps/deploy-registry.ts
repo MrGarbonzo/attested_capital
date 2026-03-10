@@ -32,8 +32,8 @@ export interface DeployRegistryInput {
 
 export interface DeployRegistryResult {
   programId: string;
-  /** Raw deployer secret key (64 bytes). Caller should transfer remaining SOL then zero this. */
-  payerSecretKey: Uint8Array;
+  /** Raw deployer secret key (64 bytes). Caller should transfer remaining SOL then zero this. Undefined if program already existed. */
+  payerSecretKey: Uint8Array | undefined;
 }
 
 async function waitForFunding(connection: Connection, publicKey: import('@solana/web3.js').PublicKey): Promise<void> {
@@ -80,18 +80,31 @@ export async function deployRegistry(input: DeployRegistryInput): Promise<Deploy
 
   const connection = new Connection(input.rpcUrl, 'confirmed');
 
-  // Generate deployer keypair inside TEE — private key never leaves
-  const payerKeypair = Keypair.generate();
-  const payerKeypairPath = join(tmpdir(), `registry-payer-${Date.now()}.json`);
-  writeFileSync(payerKeypairPath, JSON.stringify(Array.from(payerKeypair.secretKey)));
-
-  // Use fixed program keypair — matches declare_id! in the .so binary
+  // Check if program already exists on-chain before requesting funding
   const programKeypairPath = DEFAULT_PROGRAM_KEYPAIR_PATH;
   if (!existsSync(programKeypairPath)) {
     throw new Error(`Program keypair not found at ${programKeypairPath}. It should be baked into the Docker image.`);
   }
   const programKeypairBytes = JSON.parse(readFileSync(programKeypairPath, 'utf-8')) as number[];
   const programKeypair = Keypair.fromSecretKey(Uint8Array.from(programKeypairBytes));
+
+  const existingAccount = await connection.getAccountInfo(programKeypair.publicKey);
+  if (existingAccount) {
+    if (existingAccount.executable) {
+      const programId = programKeypair.publicKey.toBase58();
+      console.log(`[boot] Registry already deployed at ${programId}, skipping deployment`);
+      return { programId, payerSecretKey: undefined };
+    }
+    throw new Error(
+      `Program account ${programKeypair.publicKey.toBase58()} exists but is NOT executable. ` +
+      `Manual cleanup required — close the account or use a new program keypair.`
+    );
+  }
+
+  // Generate deployer keypair inside TEE — private key never leaves
+  const payerKeypair = Keypair.generate();
+  const payerKeypairPath = join(tmpdir(), `registry-payer-${Date.now()}.json`);
+  writeFileSync(payerKeypairPath, JSON.stringify(Array.from(payerKeypair.secretKey)));
 
   try {
     // Wait for operator to fund the deployer address
