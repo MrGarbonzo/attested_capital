@@ -45,7 +45,8 @@ COPY --from=builder /build/dist/ dist/
 COPY --from=builder /build/node_modules/ node_modules/
 COPY boot-agent/package.json ./
 
-# Copy pre-built registry .so
+# Copy pre-built registry .so and fixed program keypair
 COPY --from=anchor-builder /build/target/deploy/solana_registry.so /opt/solana-registry/solana_registry.so
+COPY solana-registry/program-keypair.json /opt/solana-registry/program-keypair.json
 
 ENTRYPOINT ["node", "dist/index.js"]

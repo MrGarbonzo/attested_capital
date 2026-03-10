@@ -6,13 +6,15 @@
  * The private key never leaves the TEE.
  */
 import { execSync } from 'node:child_process';
-import { writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Keypair, Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 /** Default path where the .so is baked into the Docker image. */
 const DEFAULT_SO_PATH = '/opt/solana-registry/solana_registry.so';
+/** Fixed program keypair — matches declare_id! in the .so binary. */
+const DEFAULT_PROGRAM_KEYPAIR_PATH = '/opt/solana-registry/program-keypair.json';
 
 /** Minimum SOL needed to deploy the registry program. */
 const MIN_DEPLOY_SOL = 3;
@@ -83,10 +85,13 @@ export async function deployRegistry(input: DeployRegistryInput): Promise<Deploy
   const payerKeypairPath = join(tmpdir(), `registry-payer-${Date.now()}.json`);
   writeFileSync(payerKeypairPath, JSON.stringify(Array.from(payerKeypair.secretKey)));
 
-  // Generate program keypair — its pubkey becomes the program ID
-  const programKeypair = Keypair.generate();
-  const programKeypairPath = join(tmpdir(), `registry-program-${Date.now()}.json`);
-  writeFileSync(programKeypairPath, JSON.stringify(Array.from(programKeypair.secretKey)));
+  // Use fixed program keypair — matches declare_id! in the .so binary
+  const programKeypairPath = DEFAULT_PROGRAM_KEYPAIR_PATH;
+  if (!existsSync(programKeypairPath)) {
+    throw new Error(`Program keypair not found at ${programKeypairPath}. It should be baked into the Docker image.`);
+  }
+  const programKeypairBytes = JSON.parse(readFileSync(programKeypairPath, 'utf-8')) as number[];
+  const programKeypair = Keypair.fromSecretKey(Uint8Array.from(programKeypairBytes));
 
   try {
     // Wait for operator to fund the deployer address
@@ -114,6 +119,5 @@ export async function deployRegistry(input: DeployRegistryInput): Promise<Deploy
     return { programId, payerSecretKey };
   } finally {
     try { unlinkSync(payerKeypairPath); } catch { /* ignore */ }
-    try { unlinkSync(programKeypairPath); } catch { /* ignore */ }
   }
 }

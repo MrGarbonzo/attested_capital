@@ -15,7 +15,7 @@ services:
     environment:
       - PANTHERS_DB_PATH=/data/panthers.db
       - STATUS_PORT=8080
-      - REGISTRY_PROGRAM_ID=6k3BkyGhqCrG8zH8G9iEd14UgDvdyApX4cY4c4tX8jxi
+      - REGISTRY_PROGRAM_ID=D8bBfaCiVegnkvHBWSEVvZw8XfQWYWS1n9EimkFZyzZ2
       - SECRETVM_PUBKEY_PEM_PATH=/mnt/secure/crypto/docker_public_key_ed25519.pem
       - SECRETVM_ATTESTATION_PATH=/mnt/secure/crypto/docker_attestation_ed25519.txt
 
