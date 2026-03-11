@@ -203,10 +203,11 @@ CREATE TABLE IF NOT EXISTS backup_agents (
   endpoint        TEXT NOT NULL,              -- http://ip:port
   registered_at   INTEGER NOT NULL,           -- epoch ms
   last_heartbeat  INTEGER NOT NULL,           -- epoch ms
+  heartbeat_streak INTEGER NOT NULL DEFAULT 0, -- current consecutive on-time heartbeats (resets on miss)
   status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stale'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_backup_agents_registered ON backup_agents(registered_at);
+CREATE INDEX IF NOT EXISTS idx_backup_agents_priority ON backup_agents(heartbeat_streak DESC, registered_at ASC);
 
 -- Ensure strategy_config singleton row exists
 INSERT OR IGNORE INTO strategy_config (id, strategy_id, parameters) VALUES (1, 'none', '{}');

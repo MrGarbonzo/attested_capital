@@ -18,6 +18,8 @@ import { VaultKeyManager } from '../vault/key-manager.js';
 import { handleConfigRequest } from './config-api.js';
 import { createStakingClient } from './staking-client.js';
 import { unsealConfig } from './unseal-config.js';
+import { runBackupAgent, registerSelfOnChain } from './backup-coordination.js';
+import { generateAttestation, serializeAttestation } from './attestation-utils.js';
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -32,7 +34,155 @@ async function main() {
   // Unseal boot-agent config before reading env vars
   unsealConfig();
 
-  console.log('[panthers-fund] Starting agent...');
+  const agentRole = (process.env.AGENT_ROLE ?? 'primary').toLowerCase();
+  console.log(`[panthers-fund] Starting agent (role: ${agentRole})...`);
+
+  // ── Backup Agent Mode ───────────────────────────────────────
+  // If AGENT_ROLE=backup, enter standby → wait for primary failure → take over
+  if (agentRole === 'backup') {
+    console.log('[panthers-fund] Backup mode — initializing TEE identity...');
+
+    const backupSigner = await createTEESigner();
+    const backupTeeIdentity = await getTEEInstanceId();
+    console.log(`[panthers-fund] Backup TEE: ${backupTeeIdentity.instanceId} (TDX: ${backupTeeIdentity.isTDX})`);
+
+    // Start minimal HTTP server for guardian-initiated failover + health checks.
+    // Guardian calls POST /api/backup/ready with { action: 'takeover' } and expects
+    // a full RegistrationRequest back (teeInstanceId, codeHash, attestation, endpoint).
+    const statusPort = Number(process.env.STATUS_PORT) || 8080;
+    const backupExternalHost = process.env.AGENT_EXTERNAL_HOST;
+    const backupOwnEndpoint = backupExternalHost
+      ? `http://${backupExternalHost}:${statusPort}`
+      : `http://localhost:${statusPort}`;
+
+    const backupServer = createServer((req, res) => {
+      if (req.method === 'GET' && req.url === '/status') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ role: 'backup', state: 'standby', teeId: backupTeeIdentity.instanceId }));
+      } else if (req.method === 'POST' && req.url === '/api/backup/ready') {
+        // Guardian-initiated failover: respond with our registration details
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const { action } = JSON.parse(body) as { action?: string };
+            if (action !== 'takeover') {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'unknown action' }));
+              return;
+            }
+
+            const attestation = generateAttestation(backupTeeIdentity.instanceId, backupTeeIdentity.codeHash);
+            console.log('[panthers-fund] Guardian requested takeover — sending registration details');
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              teeInstanceId: backupTeeIdentity.instanceId,
+              codeHash: backupTeeIdentity.codeHash,
+              attestation: serializeAttestation(attestation),
+              endpoint: backupOwnEndpoint,
+              ed25519PubkeyBase64: backupSigner.ed25519PubkeyBase64,
+              x25519PubkeyBase64: backupSigner.x25519PubkeyBase64,
+              x25519Signature: backupSigner.x25519Signature,
+            }));
+          } catch {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'internal error' }));
+          }
+        });
+      } else if (req.method === 'GET' && req.url === '/api/backup/ready') {
+        // Simple readiness probe
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ready: true }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    backupServer.listen(statusPort, () => {
+      console.log(`[panthers-fund] Backup status server listening on port ${statusPort}`);
+    });
+
+    // Determine guardian endpoint: prefer BOOTSTRAP_GUARDIANS, fall back to Solana registry
+    let guardianEndpoint: string | undefined;
+    const bootstrapEndpoints = (process.env.BOOTSTRAP_GUARDIANS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    if (bootstrapEndpoints.length > 0) {
+      guardianEndpoint = bootstrapEndpoints[0];
+      console.log(`[panthers-fund] Backup using bootstrap guardian: ${guardianEndpoint}`);
+    } else {
+      // Try Solana registry
+      const registryProgramIdStr = process.env.REGISTRY_PROGRAM_ID;
+      if (registryProgramIdStr) {
+        try {
+          const conn = new Connection(requireEnv('SOLANA_RPC_URL'), 'confirmed');
+          const regClient = new SolanaRegistryClient(conn, backupSigner as any, new PublicKey(registryProgramIdStr));
+          const guardians = await regClient.getGuardians();
+          const active = guardians.find(g => g.isActive);
+          if (active) {
+            guardianEndpoint = active.endpoint;
+            console.log(`[panthers-fund] Backup using registry guardian: ${guardianEndpoint}`);
+          }
+        } catch (err) {
+          console.warn(`[panthers-fund] Backup registry lookup failed: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+    }
+
+    if (!guardianEndpoint) {
+      throw new Error('Backup agent requires a guardian endpoint — set BOOTSTRAP_GUARDIANS or REGISTRY_PROGRAM_ID');
+    }
+
+    // Discover primary agent endpoint from Solana registry (for registered standby)
+    let primaryAgentEndpoint: string | undefined;
+    const registryProgramIdForBackup = process.env.REGISTRY_PROGRAM_ID;
+    if (registryProgramIdForBackup) {
+      try {
+        const conn = new Connection(requireEnv('SOLANA_RPC_URL'), 'confirmed');
+        const regClient = new SolanaRegistryClient(conn, backupSigner as any, new PublicKey(registryProgramIdForBackup));
+        const agents = await regClient.getAgents();
+        const activeAgent = agents.find((a: any) => a.isActive);
+        if (activeAgent) {
+          primaryAgentEndpoint = activeAgent.endpoint;
+          console.log(`[panthers-fund] Backup discovered primary at: ${primaryAgentEndpoint}`);
+        }
+      } catch (err) {
+        console.warn(`[panthers-fund] Backup primary discovery failed (will use guardian-only): ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    const dbDir = process.env.PANTHERS_DB_DIR ?? '/data';
+    console.log('[panthers-fund] Entering standby mode — waiting for primary failure...');
+
+    // This blocks until takeover succeeds (or returns null if unrecoverable).
+    // Two paths can trigger takeover:
+    //   1. Guardian-initiated: guardian contacts us at POST /api/backup/ready, proposes our registration
+    //   2. Self-initiated: we poll the guardian, detect primary down, request registration ourselves
+    // Both are safe — registry enforces single active agent.
+    const takeoverResult = await runBackupAgent({
+      guardianEndpoint,
+      dbDir,
+      ownEndpoint: backupOwnEndpoint,
+      ed25519PubkeyBase64: backupSigner.ed25519PubkeyBase64,
+      primaryAgentEndpoint,
+    });
+    if (!takeoverResult) {
+      throw new Error('Backup takeover returned null — cannot continue');
+    }
+
+    console.log(`[panthers-fund] Takeover successful! DB recovered at: ${takeoverResult.dbPath}`);
+
+    // Close the minimal backup server — the full server will start below
+    backupServer.close();
+
+    // Set the recovered DB path for the rest of startup
+    if (takeoverResult.dbPath) {
+      process.env.PANTHERS_DB_PATH = takeoverResult.dbPath;
+    }
+
+    // Register on Solana with our own endpoint (after full server starts below)
+    // We'll do this after the registry client is created in the primary flow
+    console.log('[panthers-fund] Transitioning to primary mode...');
+  }
 
   // ── Initialize service context ──────────────────────────────
   const ctx = initContext({
@@ -358,11 +508,7 @@ async function main() {
   }
 
   // ── Guardian discovery config ───────────────────────────────
-  const groupChatIdStr = process.env.TELEGRAM_GROUP_CHAT_ID;
-  if (groupChatIdStr) {
-    ctx.groupChatId = Number(groupChatIdStr);
-    console.log(`[panthers-fund] Guardian group chat ID: ${ctx.groupChatId}`);
-  }
+  // (groupChatId is resolved later alongside other Telegram config from DB)
 
   // ── TEE Signing + Identity + VaultClient (before bot) ───────
   let signer: Awaited<ReturnType<typeof createTEESigner>> | undefined;
@@ -425,8 +571,57 @@ async function main() {
   });
   ctx.sentimentLlm = sentimentLlm;
 
-  // ── Create Telegram bot ─────────────────────────────────────
-  const botToken = requireEnv('TELEGRAM_BOT_TOKEN');
+  // ── Resolve Telegram bot token ──────────────────────────────
+  // Primary: token from env/sealed-config → save to DB for backup agents.
+  // Backup: token recovered from DB (no sealed config for Telegram).
+  let botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (botToken) {
+    // Primary path: persist to DB so backups inherit it
+    ctx.db.setConfigValue('telegram_bot_token', botToken);
+  } else {
+    // Backup path: read from recovered DB
+    botToken = ctx.db.getConfigValue('telegram_bot_token') ?? undefined;
+    if (!botToken) {
+      throw new Error('TELEGRAM_BOT_TOKEN not in env and not found in recovered DB');
+    }
+    console.log('[panthers-fund] Bot token loaded from recovered DB');
+  }
+
+  // Same pattern for group chat ID
+  if (process.env.TELEGRAM_GROUP_CHAT_ID) {
+    ctx.groupChatId = Number(process.env.TELEGRAM_GROUP_CHAT_ID);
+    ctx.db.setConfigValue('telegram_group_chat_id', process.env.TELEGRAM_GROUP_CHAT_ID);
+    console.log(`[panthers-fund] Group chat ID: ${ctx.groupChatId}`);
+  } else {
+    const savedGroupChatId = ctx.db.getConfigValue('telegram_group_chat_id');
+    if (savedGroupChatId) {
+      ctx.groupChatId = Number(savedGroupChatId);
+      console.log(`[panthers-fund] Group chat ID loaded from DB: ${ctx.groupChatId}`);
+    }
+  }
+
+  // Same for alert chat ID
+  if (process.env.TELEGRAM_ALERT_CHAT_ID) {
+    ctx.db.setConfigValue('telegram_alert_chat_id', process.env.TELEGRAM_ALERT_CHAT_ID);
+  } else {
+    const savedAlertChatId = ctx.db.getConfigValue('telegram_alert_chat_id');
+    if (savedAlertChatId) {
+      process.env.TELEGRAM_ALERT_CHAT_ID = savedAlertChatId;
+      console.log(`[panthers-fund] Alert chat ID loaded from recovered DB: ${savedAlertChatId}`);
+    }
+  }
+
+  // Same for allowed users
+  if (process.env.TELEGRAM_ALLOWED_USERS) {
+    ctx.db.setConfigValue('telegram_allowed_users', process.env.TELEGRAM_ALLOWED_USERS);
+  } else {
+    const savedAllowedUsers = ctx.db.getConfigValue('telegram_allowed_users');
+    if (savedAllowedUsers) {
+      process.env.TELEGRAM_ALLOWED_USERS = savedAllowedUsers;
+      console.log('[panthers-fund] Allowed users loaded from recovered DB');
+    }
+  }
+
   const allowedUsers = process.env.TELEGRAM_ALLOWED_USERS?.split(',').filter(Boolean);
 
   // Build a map of tools available in degraded mode (no LLM needed)
@@ -490,6 +685,27 @@ async function main() {
       }
     } else if (teeIdentity && !currentHostname) {
       console.log('[panthers-fund] Deferring on-chain registration — waiting for /api/set-hostname');
+    }
+
+    // If we just completed a backup takeover, register on-chain with our endpoint
+    if (agentRole === 'backup' && teeIdentity && registryClient) {
+      const backupEndpoint = currentHostname
+        ? `http://${currentHostname}:${statusPort}`
+        : undefined;
+      if (backupEndpoint) {
+        const regResult = await registerSelfOnChain({
+          registryClient,
+          teeIdentity,
+          endpoint: backupEndpoint,
+          ed25519Pubkey: signer?.ed25519PubkeyBase64 ?? '',
+        });
+        if (regResult.success) {
+          registeredOnChain.value = true;
+          console.log(`[panthers-fund] Backup registered on-chain at ${backupEndpoint}`);
+        }
+      } else {
+        console.log('[panthers-fund] Backup deferring on-chain registration — no hostname yet');
+      }
     }
 
     // Discover guardians from registry

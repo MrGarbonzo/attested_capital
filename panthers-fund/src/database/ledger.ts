@@ -123,7 +123,7 @@ export class DatabaseLedger {
     }
   }
 
-  /** Ensure backup_agents table exists for older DBs. */
+  /** Ensure backup_agents table exists (with heartbeat_streak) for older DBs. */
   private migrateBackupAgents(): void {
     const tables = this.db.prepare(
       `SELECT name FROM sqlite_master WHERE type='table' AND name='backup_agents'`
@@ -136,10 +136,19 @@ export class DatabaseLedger {
           endpoint        TEXT NOT NULL,
           registered_at   INTEGER NOT NULL,
           last_heartbeat  INTEGER NOT NULL,
+          heartbeat_streak INTEGER NOT NULL DEFAULT 0,
           status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stale'))
         );
-        CREATE INDEX IF NOT EXISTS idx_backup_agents_registered ON backup_agents(registered_at);
+        CREATE INDEX IF NOT EXISTS idx_backup_agents_priority ON backup_agents(heartbeat_streak DESC, registered_at ASC);
       `);
+    } else {
+      // Add heartbeat_streak column if missing (older DBs)
+      const cols = this.db.prepare(`PRAGMA table_info(backup_agents)`).all() as Array<{ name: string }>;
+      if (!cols.some(c => c.name === 'heartbeat_streak')) {
+        this.db.exec(`ALTER TABLE backup_agents ADD COLUMN heartbeat_streak INTEGER NOT NULL DEFAULT 0`);
+        this.db.exec(`DROP INDEX IF EXISTS idx_backup_agents_registered`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_backup_agents_priority ON backup_agents(heartbeat_streak DESC, registered_at ASC)`);
+      }
     }
   }
 
@@ -1170,56 +1179,68 @@ export class DatabaseLedger {
 
   // ── Backup Agent Registry ──────────────────────────────────
 
-  /** Register a backup agent (INSERT OR REPLACE). Returns its position in the queue. */
+  /** Register a backup agent. On re-register, keeps existing streak. Returns priority position. */
   registerBackupAgent(id: string, endpoint: string): number {
     const now = Date.now();
     this.db.prepare(
-      `INSERT INTO backup_agents (id, endpoint, registered_at, last_heartbeat, status)
-       VALUES (?, ?, ?, ?, 'active')
+      `INSERT INTO backup_agents (id, endpoint, registered_at, last_heartbeat, heartbeat_streak, status)
+       VALUES (?, ?, ?, ?, 0, 'active')
        ON CONFLICT(id) DO UPDATE SET
          endpoint = excluded.endpoint,
          last_heartbeat = excluded.last_heartbeat,
          status = 'active'`
     ).run(id, endpoint, now, now);
 
-    // Return position (1-based, ordered by registration time)
+    // Return position (1-based, ordered by priority: streak DESC, registered_at ASC)
     const row = this.db.prepare(
-      `SELECT COUNT(*) AS pos FROM backup_agents WHERE registered_at <= (
-         SELECT registered_at FROM backup_agents WHERE id = ?
-       )`
-    ).get(id) as { pos: number };
+      `SELECT COUNT(*) AS pos FROM backup_agents
+       WHERE heartbeat_streak > (SELECT heartbeat_streak FROM backup_agents WHERE id = ?)
+          OR (heartbeat_streak = (SELECT heartbeat_streak FROM backup_agents WHERE id = ?)
+              AND registered_at <= (SELECT registered_at FROM backup_agents WHERE id = ?))`
+    ).get(id, id, id) as { pos: number };
     return row.pos;
   }
 
-  /** Update heartbeat timestamp for a backup agent. Optionally update endpoint. */
+  /** Update heartbeat timestamp for a backup agent. Increments streak if on-time, resets if late. */
   backupAgentHeartbeat(id: string, endpoint?: string): boolean {
     const now = Date.now();
+    // 35 min grace window (30 min interval + 5 min grace = 2100000ms)
+    const GRACE_MS = 2_100_000;
     let result;
     if (endpoint) {
       result = this.db.prepare(
-        `UPDATE backup_agents SET last_heartbeat = ?, endpoint = ?, status = 'active' WHERE id = ?`
-      ).run(now, endpoint, id);
+        `UPDATE backup_agents SET
+           last_heartbeat = ?,
+           endpoint = ?,
+           heartbeat_streak = CASE WHEN (? - last_heartbeat) <= ? THEN heartbeat_streak + 1 ELSE 0 END,
+           status = 'active'
+         WHERE id = ?`
+      ).run(now, endpoint, now, GRACE_MS, id);
     } else {
       result = this.db.prepare(
-        `UPDATE backup_agents SET last_heartbeat = ?, status = 'active' WHERE id = ?`
-      ).run(now, id);
+        `UPDATE backup_agents SET
+           last_heartbeat = ?,
+           heartbeat_streak = CASE WHEN (? - last_heartbeat) <= ? THEN heartbeat_streak + 1 ELSE 0 END,
+           status = 'active'
+         WHERE id = ?`
+      ).run(now, now, GRACE_MS, id);
     }
     return result.changes > 0;
   }
 
-  /** Get all backup agents ordered by registration time (oldest first). */
-  getBackupAgents(): Array<{ id: string; endpoint: string; registered_at: number; last_heartbeat: number; status: string }> {
+  /** Get all backup agents ordered by priority (highest streak first, then oldest). */
+  getBackupAgents(): Array<{ id: string; endpoint: string; registered_at: number; last_heartbeat: number; heartbeat_streak: number; status: string }> {
     return this.db.prepare(
-      `SELECT * FROM backup_agents ORDER BY registered_at ASC`
-    ).all() as Array<{ id: string; endpoint: string; registered_at: number; last_heartbeat: number; status: string }>;
+      `SELECT * FROM backup_agents ORDER BY heartbeat_streak DESC, registered_at ASC`
+    ).all() as Array<{ id: string; endpoint: string; registered_at: number; last_heartbeat: number; heartbeat_streak: number; status: string }>;
   }
 
-  /** Get backup agents with fresh heartbeats (within maxStaleMs). */
-  getFreshBackupAgents(maxStaleMs: number): Array<{ id: string; endpoint: string; registered_at: number; last_heartbeat: number; status: string }> {
+  /** Get backup agents with fresh heartbeats (within maxStaleMs), ordered by priority. */
+  getFreshBackupAgents(maxStaleMs: number): Array<{ id: string; endpoint: string; registered_at: number; last_heartbeat: number; heartbeat_streak: number; status: string }> {
     const cutoff = Date.now() - maxStaleMs;
     return this.db.prepare(
-      `SELECT * FROM backup_agents WHERE last_heartbeat > ? ORDER BY registered_at ASC`
-    ).all(cutoff) as Array<{ id: string; endpoint: string; registered_at: number; last_heartbeat: number; status: string }>;
+      `SELECT * FROM backup_agents WHERE last_heartbeat > ? ORDER BY heartbeat_streak DESC, registered_at ASC`
+    ).all(cutoff) as Array<{ id: string; endpoint: string; registered_at: number; last_heartbeat: number; heartbeat_streak: number; status: string }>;
   }
 
   /** Remove a backup agent by ID. */

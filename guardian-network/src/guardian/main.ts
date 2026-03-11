@@ -503,8 +503,8 @@ async function main(): Promise<void> {
                 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
                 const cutoff = Date.now() - TWO_HOURS_MS;
                 const backupList = tmpDb.prepare(
-                  `SELECT id, endpoint, registered_at, last_heartbeat FROM backup_agents
-                   WHERE last_heartbeat > ? ORDER BY registered_at ASC`
+                  `SELECT id, endpoint, registered_at, last_heartbeat, heartbeat_streak FROM backup_agents
+                   WHERE last_heartbeat > ? ORDER BY heartbeat_streak DESC, registered_at ASC`
                 ).all(cutoff) as BackupAgentEntry[];
 
                 console.log(`[Sentry] Found ${backupList.length} fresh backup agent(s) in snapshot`);

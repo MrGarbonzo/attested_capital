@@ -197,6 +197,7 @@ export interface BackupAgentEntry {
   endpoint: string;
   registered_at: number;
   last_heartbeat: number;
+  heartbeat_streak: number;
 }
 
 export interface OrderedFailoverResult {

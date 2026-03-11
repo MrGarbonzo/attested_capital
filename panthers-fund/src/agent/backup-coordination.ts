@@ -42,6 +42,10 @@ export interface TakeoverConfig {
   teeIdentity: TEEIdentity;
   /** Directory to write recovered database to. */
   dbDir: string;
+  /** This backup agent's own endpoint (for registration). */
+  ownEndpoint?: string;
+  /** Ed25519 pubkey base64 (for trust store). */
+  ed25519PubkeyBase64?: string;
 }
 
 /**
@@ -73,7 +77,9 @@ export async function attemptTakeover(config: TakeoverConfig): Promise<TakeoverR
     }
 
     // Step 3: Request registration
-    const regResult = await requestRegistration(endpoint, config.teeIdentity);
+    const regResult = await requestRegistration(
+      endpoint, config.teeIdentity, config.ownEndpoint, config.ed25519PubkeyBase64,
+    );
     if (regResult.success) {
       console.log('[Takeover] Registration successful — fetching database');
 
@@ -89,11 +95,10 @@ export async function attemptTakeover(config: TakeoverConfig): Promise<TakeoverR
         return { outcome: 'success', dbPath: dbResult.dbPath! };
       }
 
-      // DB recovery failed — we're registered but can't trade yet
-      // This is still a success from registration perspective;
-      // the caller should retry DB recovery
+      // DB recovery failed — can't start with no data
+      // Return failure so the caller retries instead of starting empty
       console.warn(`[Takeover] DB recovery failed: ${dbResult.error}`);
-      return { outcome: 'success', dbPath: '' };
+      return { outcome: 'failed', error: `DB recovery failed: ${dbResult.error}` };
     }
 
     if (regResult.lost) {
@@ -140,6 +145,8 @@ async function checkRegistry(
 async function requestRegistration(
   endpoint: string,
   teeIdentity: TEEIdentity,
+  ownEndpoint?: string,
+  ed25519PubkeyBase64?: string,
 ): Promise<{ success: boolean; lost?: boolean; activeAgent?: string; error?: string }> {
   try {
     const attestation = generateAttestation(teeIdentity.instanceId, teeIdentity.codeHash);
@@ -151,7 +158,8 @@ async function requestRegistration(
         teeInstanceId: teeIdentity.instanceId,
         codeHash: teeIdentity.codeHash,
         attestation: serializeAttestation(attestation),
-        endpoint: 'self',
+        endpoint: ownEndpoint ?? 'pending',
+        ed25519PubkeyBase64,
       }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -218,46 +226,91 @@ function sleep(ms: number): Promise<void> {
 export async function runBackupAgent(config: {
   guardianEndpoint: string;
   dbDir: string;
+  ownEndpoint?: string;
+  ed25519PubkeyBase64?: string;
+  /** Primary agent endpoint (discovered from Solana registry). */
+  primaryAgentEndpoint?: string;
 }): Promise<{ dbPath: string; teeIdentity: TEEIdentity } | null> {
   // Import dynamically to avoid circular deps
-  const { createStandbyManager } = await import('./standby-mode.js');
+  const { createStandbyManager, createAgentRegisteredStandby } = await import('./standby-mode.js');
   const { getTEEInstanceId } = await import('./tee.js');
 
   const teeIdentity = await getTEEInstanceId();
   let resolved = false;
 
-  return new Promise((resolve) => {
-    const standby = createStandbyManager(config.guardianEndpoint, {
-      onPrimaryFailure: async () => {
-        if (resolved) return false;
+  /** Shared takeover handler used by both standby modes. Returns dbPath on success. */
+  let lastTakeoverDbPath = '';
+  async function handlePrimaryFailure(): Promise<boolean> {
+    if (resolved) return false;
 
-        const result = await attemptTakeover({
-          guardianEndpoint: config.guardianEndpoint,
-          teeIdentity,
-          dbDir: config.dbDir,
-        });
-
-        if (result.outcome === 'success') {
-          resolved = true;
-          (standby as any).transitionToRegistered?.();
-          resolve({ dbPath: result.dbPath, teeIdentity });
-          return true;
-        }
-
-        if (result.outcome === 'lost_race') {
-          (standby as any).transitionToLostRace?.();
-        }
-
-        return false;
-      },
-      onBecamePrimary: async () => {
-        console.log('[Backup] Became primary — exiting standby');
-      },
-      onLostRace: () => {
-        console.log('[Backup] Lost race — returning to standby monitoring');
-      },
+    const result = await attemptTakeover({
+      guardianEndpoint: config.guardianEndpoint,
+      teeIdentity,
+      dbDir: config.dbDir,
+      ownEndpoint: config.ownEndpoint,
+      ed25519PubkeyBase64: config.ed25519PubkeyBase64,
     });
 
-    standby.start();
+    if (result.outcome === 'success') {
+      resolved = true;
+      lastTakeoverDbPath = result.dbPath;
+      return true;
+    }
+
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    // Prefer registered standby (registers with primary, heartbeats, builds streak)
+    if (config.primaryAgentEndpoint && config.ownEndpoint && config.ed25519PubkeyBase64) {
+      console.log(`[Backup] Using registered standby with primary at ${config.primaryAgentEndpoint}`);
+
+      const registeredStandby = createAgentRegisteredStandby(
+        config.primaryAgentEndpoint,
+        config.ed25519PubkeyBase64,
+        config.ownEndpoint,
+        {
+          getGuardianEndpoint: () => config.guardianEndpoint,
+          onPrimaryFailure: async () => {
+            const took = await handlePrimaryFailure();
+            if (took) {
+              registeredStandby.stop();
+              resolve({ dbPath: lastTakeoverDbPath, teeIdentity });
+            }
+            return took;
+          },
+          onBecamePrimary: async () => {
+            console.log('[Backup] Became primary — exiting standby');
+          },
+          onLostRace: () => {
+            console.log('[Backup] Lost race — returning to standby monitoring');
+          },
+        },
+      );
+
+      registeredStandby.start();
+    } else {
+      // Fallback: guardian-only polling (no streak building)
+      console.log('[Backup] Using guardian-only standby (no primary endpoint for registration)');
+
+      const standby = createStandbyManager(config.guardianEndpoint, {
+        onPrimaryFailure: async () => {
+          const took = await handlePrimaryFailure();
+          if (took) {
+            (standby as any).transitionToRegistered?.();
+            resolve({ dbPath: lastTakeoverDbPath, teeIdentity });
+          }
+          return took;
+        },
+        onBecamePrimary: async () => {
+          console.log('[Backup] Became primary — exiting standby');
+        },
+        onLostRace: () => {
+          console.log('[Backup] Lost race — returning to standby monitoring');
+        },
+      });
+
+      standby.start();
+    }
   });
 }
