@@ -4,7 +4,7 @@ members = [
 ]
 resolver = "2"
 
-# Program ID: 2MyEEALvHLeLLZih36BJWj9HgvTr9itvNJQogDRixTUV
+# Program ID: CUowZcdZHGajxPEHp6xvBcXj7MUbGubvyKqDCwZmTREo
 
 [profile.release]
 overflow-checks = true
