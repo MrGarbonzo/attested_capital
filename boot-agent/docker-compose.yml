@@ -1,8 +1,12 @@
 version: "3.8"
 
+# IMPORTANT: Edit the image tag below before each deploy.
+# The exact docker-compose.yml is measured in RTMR for attestation,
+# so the tag must be hardcoded — not a variable.
+
 services:
   boot-agent:
-    image: ghcr.io/mrgarbonzo/boot-agent:${BOOT_IMAGE_TAG:?BOOT_IMAGE_TAG must be set}
+    image: ghcr.io/mrgarbonzo/boot-agent:EDIT_TAG_BEFORE_DEPLOY
     container_name: panthers-boot-agent
     restart: "no"
     env_file: .env
