@@ -156,6 +156,47 @@ async function main(): Promise<void> {
     }
   }
 
+  // ── Step 7: Notify agent of its hostname (always, if we have the domain) ──
+  if (agentDomain) {
+    const agentBaseUrl = `http://${agentDomain}:8080`;
+    console.log(`[boot] Step 7: Notifying agent of hostname: ${agentDomain}`);
+
+    // Wait for agent to come online (it may still be starting)
+    const maxWait = 5 * 60_000; // 5 minutes
+    const pollInterval = 15_000;
+    const waitStart = Date.now();
+    let agentUp = false;
+
+    while (Date.now() - waitStart < maxWait) {
+      try {
+        const res = await fetch(`${agentBaseUrl}/status`, { signal: AbortSignal.timeout(10_000) });
+        if (res.ok) { agentUp = true; break; }
+      } catch { /* not up yet */ }
+      await new Promise((r) => setTimeout(r, pollInterval));
+    }
+
+    if (agentUp) {
+      try {
+        const res = await fetch(`${agentBaseUrl}/api/set-hostname`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hostname: agentDomain }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (res.ok) {
+          const result = await res.json() as { ok?: boolean; endpoint?: string };
+          console.log(`[boot] Agent registered on-chain with endpoint: ${result.endpoint}`);
+        } else {
+          console.warn(`[boot] Agent hostname notification failed: ${res.status}`);
+        }
+      } catch (err) {
+        console.warn(`[boot] Agent hostname notification error: ${err instanceof Error ? err.message : err}`);
+      }
+    } else {
+      console.warn(`[boot] Agent did not come online within ${maxWait / 60_000} minutes — hostname not set`);
+    }
+  }
+
   // ── Done ─────────────────────────────────────────────────
   console.log('[boot] ════════════════════════════════════════');
   console.log('[boot] Boot sequence complete');
