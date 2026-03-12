@@ -51,7 +51,7 @@ async function main() {
     // a full RegistrationRequest back (teeInstanceId, codeHash, attestation, endpoint).
     const statusPort = Number(process.env.STATUS_PORT) || 8080;
     const backupExternalHost = process.env.AGENT_EXTERNAL_HOST;
-    const backupOwnEndpoint = backupExternalHost
+    let backupOwnEndpoint = backupExternalHost
       ? `http://${backupExternalHost}:${statusPort}`
       : `http://localhost:${statusPort}`;
 
@@ -94,6 +94,27 @@ async function main() {
         // Simple readiness probe
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ready: true }));
+      } else if (req.method === 'POST' && req.url === '/api/set-hostname') {
+        // Called by boot-agent after VM creation to set the external hostname.
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const { hostname } = JSON.parse(body) as { hostname: string };
+            if (!hostname) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'missing hostname' }));
+              return;
+            }
+            backupOwnEndpoint = `http://${hostname}:${statusPort}`;
+            console.log(`[panthers-fund] Backup hostname set by boot-agent: ${hostname} → ${backupOwnEndpoint}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, endpoint: backupOwnEndpoint }));
+          } catch {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'internal error' }));
+          }
+        });
       } else {
         res.writeHead(404);
         res.end();

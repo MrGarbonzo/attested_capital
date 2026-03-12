@@ -8,7 +8,9 @@
  *   4. Writes sealed configs to disk (backup)
  *   5. Deploys agent VM via secretvm-cli with secrets injected
  *   6. Verifies agent TEE attestation & transfers remaining deployer SOL
- *   7. Exits — never needs to run again
+ *   7. Notifies agent of its hostname
+ *   8. Deploys backup agent VM (AGENT_ROLE=backup, guardians handle promotion)
+ *   9. Exits — never needs to run again
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -16,7 +18,7 @@ import { generateVaultKey } from './steps/generate-vault-key.js';
 import { writeSealedConfig } from './steps/write-sealed-config.js';
 import { verifyRegistry } from './steps/verify-registry.js';
 import { deployRegistry } from './steps/deploy-registry.js';
-import { deployAgentVm } from './steps/deploy-vms.js';
+import { deployAgentVm, deployBackupVm } from './steps/deploy-vms.js';
 import { verifyAndFundAgent } from './steps/verify-and-fund-agent.js';
 import type { BootInput } from './config.js';
 
@@ -197,12 +199,36 @@ async function main(): Promise<void> {
     }
   }
 
+  // ── Step 8: Deploy backup agent VM (fire-and-forget) ────
+  // Backup starts with AGENT_ROLE=backup baked into the compose.
+  // Guardians handle discovery and promotion — boot agent just deploys it.
+  let backupVmId: string | undefined;
+  let backupDomain: string | undefined;
+  try {
+    console.log('[boot] Step 8: Deploy backup agent VM');
+    const backupResult = deployBackupVm({
+      bootInput,
+      registryProgramId,
+      agentImageTag,
+      vmSize,
+      devMode,
+    });
+    backupVmId = backupResult.backupVmId;
+    backupDomain = backupResult.backupDomain;
+    console.log(`[boot] Backup VM deployed: ${backupVmId} (${backupDomain ?? 'domain unknown'})`);
+  } catch (err) {
+    console.warn(`[boot] Backup VM deployment failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+    console.warn('[boot] Primary agent is still operational — backup can be deployed manually later');
+  }
+
   // ── Done ─────────────────────────────────────────────────
   console.log('[boot] ════════════════════════════════════════');
   console.log('[boot] Boot sequence complete');
   console.log(`[boot]   Registry: ${registryProgramId}`);
   console.log(`[boot]   Agent VM: ${agentVmId}`);
   console.log(`[boot]   Agent domain: ${agentDomain ?? 'unknown'}`);
+  console.log(`[boot]   Backup VM: ${backupVmId ?? 'not deployed'}`);
+  console.log(`[boot]   Backup domain: ${backupDomain ?? 'unknown'}`);
   console.log(`[boot]   Agent config: ${agentConfigPath}`);
   console.log(`[boot]   Registry ID: ${registryIdPath}`);
   console.log('[boot] ════════════════════════════════════════');
