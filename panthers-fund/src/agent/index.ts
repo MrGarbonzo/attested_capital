@@ -581,10 +581,11 @@ async function main() {
   } else {
     // Backup path: read from recovered DB
     botToken = ctx.db.getConfigValue('telegram_bot_token') ?? undefined;
-    if (!botToken) {
-      throw new Error('TELEGRAM_BOT_TOKEN not in env and not found in recovered DB');
+    if (botToken) {
+      console.log('[panthers-fund] Bot token loaded from recovered DB');
+    } else {
+      console.log('[panthers-fund] No Telegram bot token — running without Telegram');
     }
-    console.log('[panthers-fund] Bot token loaded from recovered DB');
   }
 
   // Same pattern for group chat ID
@@ -629,26 +630,30 @@ async function main() {
     ['get_fund_state', 'get_trade_history'].includes(t.name),
   ).map(t => [t.name, t]));
 
-  const bot = createBot(tools, {
-    botToken,
-    allowedUsers,
-    groupChatId: ctx.groupChatId,
-    discoveredGuardians: ctx.discoveredGuardians,
-    llm,
-    degradedTools,
-  });
-  botHolder.bot = bot;
-
-  // ── Start bot polling (non-blocking) ────────────────────────
-  const botReady = new Promise<void>(resolve => {
-    bot.start({
-      onStart: () => {
-        console.log('[panthers-fund] Telegram bot started polling');
-        resolve();
-      },
+  if (botToken) {
+    const bot = createBot(tools, {
+      botToken,
+      allowedUsers,
+      groupChatId: ctx.groupChatId,
+      discoveredGuardians: ctx.discoveredGuardians,
+      llm,
+      degradedTools,
     });
-  });
-  await botReady;
+    botHolder.bot = bot;
+
+    // ── Start bot polling (non-blocking) ────────────────────────
+    const botReady = new Promise<void>(resolve => {
+      bot.start({
+        onStart: () => {
+          console.log('[panthers-fund] Telegram bot started polling');
+          resolve();
+        },
+      });
+    });
+    await botReady;
+  } else {
+    console.log('[panthers-fund] Telegram bot disabled — no token available');
+  }
 
   // ── Discover guardians from Solana registry ─────────────────
   const registryProgramIdStr = process.env.REGISTRY_PROGRAM_ID;
