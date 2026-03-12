@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("CUowZcdZHGajxPEHp6xvBcXj7MUbGubvyKqDCwZmTREo");
+declare_id!("5LrwsBBCh4xNUxVXv5s22UCamwXrduFNuLFGxSRtXwzX");
 
 /// Maximum endpoint URL length in bytes.
 const MAX_ENDPOINT_LEN: usize = 256;
