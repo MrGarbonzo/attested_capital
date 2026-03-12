@@ -37,7 +37,7 @@ interface CronConfig {
   registeredOnChain?: { value: boolean };
 }
 
-export function startCronJobs(ctx: ServiceContext, bot: Bot, config: CronConfig): void {
+export function startCronJobs(ctx: ServiceContext, bot: Bot | undefined, config: CronConfig): void {
   const alertChat = config.alertChatId;
 
   // ── Balance snapshot: every hour at :30 ──────────────────────

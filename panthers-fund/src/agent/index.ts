@@ -828,7 +828,7 @@ async function main() {
 
   // ── Start cron jobs ─────────────────────────────────────────
   const agentEndpoint = currentHostname ? `http://${currentHostname}:${statusPort}` : undefined;
-  startCronJobs(ctx, bot, {
+  startCronJobs(ctx, botHolder.bot, {
     alertChatId: process.env.TELEGRAM_ALERT_CHAT_ID,
     vaultClient,
     discoveredGuardians: ctx.discoveredGuardians,
@@ -861,8 +861,8 @@ async function main() {
     `Endpoint: ${agentEndpoint ?? 'pending (waiting for /api/set-hostname)'}`;
 
   const alertChatId = process.env.TELEGRAM_ALERT_CHAT_ID;
-  if (alertChatId) await sendAlert(bot, alertChatId, onlineMsg);
-  if (ctx.groupChatId) await sendAlert(bot, String(ctx.groupChatId), onlineMsg);
+  if (botHolder.bot && alertChatId) await sendAlert(botHolder.bot, alertChatId, onlineMsg);
+  if (botHolder.bot && ctx.groupChatId) await sendAlert(botHolder.bot, String(ctx.groupChatId), onlineMsg);
 }
 
 main().catch((err) => {

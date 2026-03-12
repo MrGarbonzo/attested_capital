@@ -271,7 +271,8 @@ export function createBot(tools: Tool[], config: TelegramConfig): Bot {
 }
 
 /** Send a message to a chat (used by cron for alerts). */
-export async function sendAlert(bot: Bot, chatId: string | number, message: string): Promise<void> {
+export async function sendAlert(bot: Bot | undefined, chatId: string | number, message: string): Promise<void> {
+  if (!bot) return;
   try {
     await bot.api.sendMessage(chatId, message);
   } catch (err: unknown) {
