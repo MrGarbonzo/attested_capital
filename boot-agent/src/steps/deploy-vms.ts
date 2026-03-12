@@ -86,6 +86,7 @@ volumes:
 
 function buildAgentEnv(input: DeployAgentVmInput): string {
   const lines = [
+    `AGENT_ROLE=primary`,
     `TELEGRAM_BOT_TOKEN=${input.bootInput.telegramAgentBotToken}`,
     `TELEGRAM_GROUP_CHAT_ID=${input.bootInput.telegramGroupChatId}`,
     `SECRET_AI_API_KEY=${input.bootInput.secretAiApiKey}`,

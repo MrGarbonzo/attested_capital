@@ -224,24 +224,29 @@ function sleep(ms: number): Promise<void> {
  *   4. If takeover fails → return to standby
  */
 export async function runBackupAgent(config: {
-  guardianEndpoint: string;
+  /** Guardian endpoint — optional. Guardian contacts us via /api/backup/ready. */
+  guardianEndpoint?: string;
   dbDir: string;
   ownEndpoint?: string;
   ed25519PubkeyBase64?: string;
-  /** Primary agent endpoint (discovered from Solana registry). */
+  /** Primary agent endpoint (discovered from Solana registry). Required. */
   primaryAgentEndpoint?: string;
 }): Promise<{ dbPath: string; teeIdentity: TEEIdentity } | null> {
   // Import dynamically to avoid circular deps
-  const { createStandbyManager, createAgentRegisteredStandby } = await import('./standby-mode.js');
+  const { createAgentRegisteredStandby } = await import('./standby-mode.js');
   const { getTEEInstanceId } = await import('./tee.js');
 
   const teeIdentity = await getTEEInstanceId();
   let resolved = false;
 
-  /** Shared takeover handler used by both standby modes. Returns dbPath on success. */
+  /** Takeover handler — only used if guardian endpoint is available. */
   let lastTakeoverDbPath = '';
   async function handlePrimaryFailure(): Promise<boolean> {
     if (resolved) return false;
+    if (!config.guardianEndpoint) {
+      console.log('[Backup] Primary failure detected but no guardian endpoint — waiting for guardian to contact us via /api/backup/ready');
+      return false;
+    }
 
     const result = await attemptTakeover({
       guardianEndpoint: config.guardianEndpoint,
@@ -260,44 +265,25 @@ export async function runBackupAgent(config: {
     return false;
   }
 
+  if (!config.primaryAgentEndpoint || !config.ownEndpoint || !config.ed25519PubkeyBase64) {
+    console.log('[Backup] Missing primary endpoint or own identity — waiting for guardian-initiated takeover via /api/backup/ready');
+    // Block forever — guardian will contact us at POST /api/backup/ready
+    return new Promise(() => {});
+  }
+
+  console.log(`[Backup] Registering with primary at ${config.primaryAgentEndpoint}`);
+
   return new Promise((resolve) => {
-    // Prefer registered standby (registers with primary, heartbeats, builds streak)
-    if (config.primaryAgentEndpoint && config.ownEndpoint && config.ed25519PubkeyBase64) {
-      console.log(`[Backup] Using registered standby with primary at ${config.primaryAgentEndpoint}`);
-
-      const registeredStandby = createAgentRegisteredStandby(
-        config.primaryAgentEndpoint,
-        config.ed25519PubkeyBase64,
-        config.ownEndpoint,
-        {
-          getGuardianEndpoint: () => config.guardianEndpoint,
-          onPrimaryFailure: async () => {
-            const took = await handlePrimaryFailure();
-            if (took) {
-              registeredStandby.stop();
-              resolve({ dbPath: lastTakeoverDbPath, teeIdentity });
-            }
-            return took;
-          },
-          onBecamePrimary: async () => {
-            console.log('[Backup] Became primary — exiting standby');
-          },
-          onLostRace: () => {
-            console.log('[Backup] Lost race — returning to standby monitoring');
-          },
-        },
-      );
-
-      registeredStandby.start();
-    } else {
-      // Fallback: guardian-only polling (no streak building)
-      console.log('[Backup] Using guardian-only standby (no primary endpoint for registration)');
-
-      const standby = createStandbyManager(config.guardianEndpoint, {
+    const registeredStandby = createAgentRegisteredStandby(
+      config.primaryAgentEndpoint!,
+      config.ed25519PubkeyBase64!,
+      config.ownEndpoint!,
+      {
+        getGuardianEndpoint: () => config.guardianEndpoint ?? '',
         onPrimaryFailure: async () => {
           const took = await handlePrimaryFailure();
           if (took) {
-            (standby as any).transitionToRegistered?.();
+            registeredStandby.stop();
             resolve({ dbPath: lastTakeoverDbPath, teeIdentity });
           }
           return took;
@@ -308,9 +294,9 @@ export async function runBackupAgent(config: {
         onLostRace: () => {
           console.log('[Backup] Lost race — returning to standby monitoring');
         },
-      });
+      },
+    );
 
-      standby.start();
-    }
+    registeredStandby.start();
   });
 }

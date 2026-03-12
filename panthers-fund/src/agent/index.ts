@@ -34,7 +34,7 @@ async function main() {
   // Unseal boot-agent config before reading env vars
   unsealConfig();
 
-  const agentRole = (process.env.AGENT_ROLE ?? 'primary').toLowerCase();
+  const agentRole = (process.env.AGENT_ROLE ?? 'backup').toLowerCase();
   console.log(`[panthers-fund] Starting agent (role: ${agentRole})...`);
 
   // ── Backup Agent Mode ───────────────────────────────────────
@@ -124,36 +124,7 @@ async function main() {
       console.log(`[panthers-fund] Backup status server listening on port ${statusPort}`);
     });
 
-    // Determine guardian endpoint: prefer BOOTSTRAP_GUARDIANS, fall back to Solana registry
-    let guardianEndpoint: string | undefined;
-    const bootstrapEndpoints = (process.env.BOOTSTRAP_GUARDIANS ?? '').split(',').map(s => s.trim()).filter(Boolean);
-    if (bootstrapEndpoints.length > 0) {
-      guardianEndpoint = bootstrapEndpoints[0];
-      console.log(`[panthers-fund] Backup using bootstrap guardian: ${guardianEndpoint}`);
-    } else {
-      // Try Solana registry
-      const registryProgramIdStr = process.env.REGISTRY_PROGRAM_ID;
-      if (registryProgramIdStr) {
-        try {
-          const conn = new Connection(requireEnv('SOLANA_RPC_URL'), 'confirmed');
-          const regClient = new SolanaRegistryClient(conn, backupSigner as any, new PublicKey(registryProgramIdStr));
-          const guardians = await regClient.getGuardians();
-          const active = guardians.find(g => g.isActive);
-          if (active) {
-            guardianEndpoint = active.endpoint;
-            console.log(`[panthers-fund] Backup using registry guardian: ${guardianEndpoint}`);
-          }
-        } catch (err) {
-          console.warn(`[panthers-fund] Backup registry lookup failed: ${err instanceof Error ? err.message : err}`);
-        }
-      }
-    }
-
-    if (!guardianEndpoint) {
-      throw new Error('Backup agent requires a guardian endpoint — set BOOTSTRAP_GUARDIANS or REGISTRY_PROGRAM_ID');
-    }
-
-    // Discover primary agent endpoint from Solana registry (for registered standby)
+    // Discover primary agent endpoint from Solana registry (required for backup)
     let primaryAgentEndpoint: string | undefined;
     const registryProgramIdForBackup = process.env.REGISTRY_PROGRAM_ID;
     if (registryProgramIdForBackup) {
@@ -167,18 +138,44 @@ async function main() {
           console.log(`[panthers-fund] Backup discovered primary at: ${primaryAgentEndpoint}`);
         }
       } catch (err) {
-        console.warn(`[panthers-fund] Backup primary discovery failed (will use guardian-only): ${err instanceof Error ? err.message : err}`);
+        console.warn(`[panthers-fund] Backup primary discovery failed: ${err instanceof Error ? err.message : err}`);
       }
+    }
+
+    if (!primaryAgentEndpoint) {
+      throw new Error('Backup agent requires a primary agent — set REGISTRY_PROGRAM_ID and ensure primary is registered on-chain');
+    }
+
+    // Guardian endpoint is optional — guardian contacts us via POST /api/backup/ready when needed
+    let guardianEndpoint: string | undefined;
+    const bootstrapEndpoints = (process.env.BOOTSTRAP_GUARDIANS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    if (bootstrapEndpoints.length > 0) {
+      guardianEndpoint = bootstrapEndpoints[0];
+      console.log(`[panthers-fund] Backup has bootstrap guardian: ${guardianEndpoint}`);
+    } else if (registryProgramIdForBackup) {
+      try {
+        const conn = new Connection(requireEnv('SOLANA_RPC_URL'), 'confirmed');
+        const regClient = new SolanaRegistryClient(conn, backupSigner as any, new PublicKey(registryProgramIdForBackup));
+        const guardians = await regClient.getGuardians();
+        const active = guardians.find(g => g.isActive);
+        if (active) {
+          guardianEndpoint = active.endpoint;
+          console.log(`[panthers-fund] Backup has registry guardian: ${guardianEndpoint}`);
+        }
+      } catch (err) {
+        console.warn(`[panthers-fund] Backup guardian lookup failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+      }
+    }
+    if (!guardianEndpoint) {
+      console.log('[panthers-fund] No guardian endpoint — guardian will contact us via /api/backup/ready');
     }
 
     const dbDir = process.env.PANTHERS_DB_DIR ?? '/data';
     console.log('[panthers-fund] Entering standby mode — waiting for primary failure...');
 
     // This blocks until takeover succeeds (or returns null if unrecoverable).
-    // Two paths can trigger takeover:
-    //   1. Guardian-initiated: guardian contacts us at POST /api/backup/ready, proposes our registration
-    //   2. Self-initiated: we poll the guardian, detect primary down, request registration ourselves
-    // Both are safe — registry enforces single active agent.
+    // Takeover is guardian-initiated: guardian contacts us at POST /api/backup/ready.
+    // Backup registers with primary, heartbeats it, and waits for guardian to trigger takeover.
     const takeoverResult = await runBackupAgent({
       guardianEndpoint,
       dbDir,
